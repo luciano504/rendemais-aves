@@ -249,7 +249,7 @@ function vBalanco(loja){
   return h;
 }
 async function salvarBalanco(){
-  const loja=sess.loja, rows=[];
+  const loja=PAPEIS_COMPRADOR.includes(sess.papel)?lojaSel:sess.loja, rows=[];
   for(const it of cache.itens){
     const el=$("#bl"+it.id_produto); if(!el||el.value==="") continue;
     const s=sugDe(loja,it.id_produto)||{};
@@ -257,7 +257,7 @@ async function salvarBalanco(){
       estoque_anterior:s.estoque_virtual??null,usuario:sess.id});
   }
   if(!rows.length) return alert("Nenhuma contagem digitada.");
-  if(!confirm(`Gravar contagem de ${rows.length} itens? Isso rebaseia o estoque virtual.`)) return;
+  if(!confirm(`Gravar contagem de ${rows.length} itens da loja ${loja}? Isso rebaseia o estoque virtual.`)) return;
   const {error}=await sb.from("aves_minibalanco").upsert(rows,{onConflict:"data,loja,id_produto"});
   if(error) return alert("Erro: "+error.message);
   alert("✅ Minibalanço gravado. O estoque virtual será ajustado no próximo sync (06h).");
@@ -268,8 +268,13 @@ async function salvarBalanco(){
 function vComprador(){
   $("#hSub").textContent="Comprador";
   lojaSel = lojaSel||Object.keys(LOJAS)[0];
-  let h=`<div class="chips">${Object.keys(LOJAS).map(l=>
+  let h=`<div class="tabs">
+    <button class="tab ${tela!=='balanco'?'on':''}" onclick="tela='pedido';render()">📋 Pedido de hoje</button>
+    <button class="tab ${tela==='balanco'?'on':''}" onclick="tela='balanco';render()">⚖️ Minibalanço</button>
+  </div>`;
+  h+=`<div class="chips">${Object.keys(LOJAS).map(l=>
     `<span class="chip ${l===lojaSel?'on':''}" onclick="lojaSel='${l}';render()">${l}</span>`).join("")}</div>`;
+  if(tela==="balanco") return h+vBalanco(lojaSel);
   const semSync=!cache.sug.some(s=>s.loja===lojaSel);
   if(semSync) h+=`<div class="alert">Sem sugestão de hoje para ${lojaSel} — o sync das 06h ainda não rodou.</div>`;
   const pend=cache.sug.filter(s=>s.loja===lojaSel&&s.sug_operador===null).length;
