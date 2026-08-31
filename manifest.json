@@ -1,0 +1,9 @@
+{
+  "name": "Aves Resfriadas — Rende Mais",
+  "short_name": "Aves RM",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#1F3864",
+  "theme_color": "#1F3864",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

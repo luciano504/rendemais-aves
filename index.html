@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F3864">
+<title>Aves Resfriadas — Rende Mais</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --navy:#1F3864; --navy2:#2a4a80; --amber:#FFBF00; --bg:#f4f6fa; --card:#ffffff;
+  --tx:#1c2333; --mut:#6b7688; --ok:#1e8e3e; --warn:#e37400; --bad:#c5221f; --bd:#e3e8f0;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#12161f; --card:#1b2230; --tx:#e8ecf4; --mut:#96a0b5; --bd:#2a3347; }
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+body{margin:0; font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--tx); font-size:15px}
+header{background:var(--navy); color:#fff; padding:12px 16px; position:sticky; top:0; z-index:10;
+  display:flex; align-items:center; gap:10px}
+header h1{font-size:17px; margin:0; flex:1; font-weight:700}
+header .sub{font-size:12px; opacity:.8}
+.badge{background:var(--amber); color:#1F3864; font-weight:700; border-radius:20px; padding:3px 10px; font-size:12px}
+main{max-width:980px; margin:0 auto; padding:14px 12px 90px}
+.card{background:var(--card); border:1px solid var(--bd); border-radius:14px; padding:14px; margin-bottom:12px}
+.tabs{display:flex; gap:8px; margin-bottom:14px; overflow-x:auto}
+.tab{border:1px solid var(--bd); background:var(--card); color:var(--tx); border-radius:20px;
+  padding:8px 16px; font-weight:600; font-size:14px; cursor:pointer; white-space:nowrap}
+.tab.on{background:var(--navy); color:#fff; border-color:var(--navy)}
+.chips{display:flex; gap:6px; flex-wrap:wrap; margin:8px 0}
+.chip{border:1px solid var(--bd); background:var(--card); border-radius:16px; padding:5px 12px;
+  font-size:13px; font-weight:600; cursor:pointer; color:var(--tx)}
+.chip.on{background:var(--amber); border-color:var(--amber); color:#1F3864}
+h2{font-size:15px; margin:18px 0 8px; color:var(--mut); text-transform:uppercase; letter-spacing:.4px}
+.item{background:var(--card); border:1px solid var(--bd); border-radius:14px; padding:12px; margin-bottom:10px}
+.item .nome{font-weight:700; font-size:14px; margin-bottom:2px}
+.item .forn{font-size:11px; font-weight:700; border-radius:4px; padding:1px 6px; margin-left:6px}
+.forn.natto{background:#e8f0fe; color:#1a56b8}
+.forn.mauricea{background:#fde8e8; color:#b81a1a}
+@media (prefers-color-scheme: dark){ .forn.natto{background:#1a2f52} .forn.mauricea{background:#4a1f1f} }
+.grid{display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:8px 0}
+.g{background:var(--bg); border-radius:8px; padding:6px 8px; text-align:center}
+.g .v{font-weight:700; font-size:15px}
+.g .l{font-size:10px; color:var(--mut); text-transform:uppercase}
+.sug{display:flex; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap}
+.sug .sis{background:var(--navy); color:#fff; border-radius:10px; padding:8px 12px; font-weight:700; font-size:15px}
+.sug .sis small{font-weight:400; opacity:.75; display:block; font-size:10px}
+input[type=number], input[type=password], input[type=text], select, textarea{
+  border:1.5px solid var(--bd); border-radius:10px; padding:10px; font-size:16px;
+  background:var(--card); color:var(--tx); width:100%}
+.sug input[type=number]{width:90px; text-align:center; font-weight:700}
+textarea{margin-top:8px; min-height:54px}
+button{border:0; border-radius:12px; padding:12px 18px; font-size:15px; font-weight:700; cursor:pointer}
+.bt-p{background:var(--amber); color:#1F3864}
+.bt-s{background:var(--navy); color:#fff}
+.bt-g{background:var(--bg); color:var(--tx); border:1px solid var(--bd)}
+.footer-bar{position:fixed; bottom:0; left:0; right:0; background:var(--card);
+  border-top:1px solid var(--bd); padding:10px 14px; display:flex; gap:10px; justify-content:center; z-index:10}
+.footer-bar button{flex:1; max-width:420px}
+.muted{color:var(--mut); font-size:13px}
+.alert{border-left:4px solid var(--warn); background:var(--card); border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:13px}
+.pos{color:var(--ok)} .neg{color:var(--bad)}
+table{width:100%; border-collapse:collapse; font-size:13px}
+th,td{padding:7px 6px; border-bottom:1px solid var(--bd); text-align:right}
+th:first-child, td:first-child{text-align:left}
+th{color:var(--mut); font-size:11px; text-transform:uppercase}
+.just{font-size:12px; background:var(--bg); border-radius:8px; padding:6px 8px; margin-top:4px; color:var(--mut)}
+.login-box{max-width:360px; margin:60px auto; text-align:center}
+.login-box img,.login-logo{width:74px;height:74px;margin-bottom:10px}
+.center{text-align:center}
+.hide{display:none}
+.tblwrap{overflow-x:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>🐔 Aves Resfriadas <span class="sub" id="hSub"></span></h1>
+  <span class="badge" id="hUser"></span>
+  <button class="bt-g" style="padding:6px 10px" onclick="sair()">Sair</button>
+</header>
+<main id="app"></main>
+<div class="footer-bar hide" id="fbar"></div>
+
+<script>
+/* ================= CONFIG ================= */
+const SUPABASE_URL = "https://estciwkeihmokvlnvaum.supabase.co";
+const SUPABASE_KEY = "sb_publishable_l14fjxQmWUeu5OXlZJ35GA_-X3ESkgZ";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const LOJAS = {L01:"L01 Veneza",L02:"L02 Máximo",L03:"L03 Royal",L05:"L05 Alvorada",L08:"L08 Tradição",L09:"L09 Massangana"};
+const PAPEIS_COMPRADOR = ["gestor","comprador","prevencao"];
+const DOW_NOMES = ["dom","seg","ter","qua","qui","sex","sáb"];
+
+let sess=null, tela="pedido", lojaSel=null, cache={};
+
+/* ================= UTIL ================= */
+const $ = s=>document.querySelector(s);
+async function sha256(t){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");}
+function hojeRecife(){ // data corrente no fuso de Recife
+  return new Intl.DateTimeFormat("en-CA",{timeZone:"America/Recife"}).format(new Date());}
+function dISO(d){return d.toISOString().slice(0,10);}
+function fmt(n,dec){ if(n===null||n===undefined) return "—";
+  return Number(n).toLocaleString("pt-BR",{minimumFractionDigits:dec??0,maximumFractionDigits:dec??1});}
+function unidade(it){return it.tipo==="granel"?"kg":it.tipo==="galeto"?"un":"bdj";}
+function unidadePedido(it){return it.tipo==="bandeja"?"cx":it.tipo==="galeto"?"un":"kg";}
+function dataBR(iso){const [a,m,d]=iso.split("-");return `${d}/${m}`;}
+function esc(t){return String(t??"").replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));}
+
+/* ================= LOGIN ================= */
+async function telaLogin(){
+  $("#hUser").textContent=""; $("#hSub").textContent="";
+  const {data,error} = await sb.from("usuarios").select("id,nome,papel")
+     .eq("ativo",true).neq("papel","fornecedor").order("nome");
+  if(error){ $("#app").innerHTML=`<div class="alert">Erro ao conectar: ${esc(error.message)}</div>`; return;}
+  $("#app").innerHTML = `
+  <div class="login-box card">
+    <div style="font-size:46px">🐔</div>
+    <h2 style="text-transform:none;font-size:18px;color:var(--tx)">Pedido de Aves Resfriadas</h2>
+    <p class="muted">Sugestão diária de pedido — Natto e Mauricea</p>
+    <select id="lgUser">${data.map(u=>`<option value="${u.id}">${esc(u.nome)}</option>`).join("")}</select>
+    <input type="password" id="lgPin" placeholder="PIN" inputmode="numeric" style="margin-top:8px">
+    <button class="bt-p" style="width:100%;margin-top:12px" onclick="doLogin()">Entrar</button>
+  </div>`;
+}
+async function doLogin(){
+  const id=$("#lgUser").value, pin=$("#lgPin").value;
+  const {data,error} = await sb.from("usuarios").select("*").eq("id",id).single();
+  if(error) return alert("Erro: "+error.message);
+  if(data.pin_hash !== await sha256(pin)) return alert("PIN incorreto.");
+  sess=data; localStorage.setItem("aves_sess",JSON.stringify({id:data.id}));
+  iniciar();
+}
+function sair(){localStorage.removeItem("aves_sess"); sess=null; telaLogin();}
+
+/* ================= DADOS ================= */
+async function carregar(){
+  const hoje = hojeRecife();
+  const d1 = new Date(hoje+"T12:00:00"); d1.setDate(d1.getDate()-1);
+  const d2 = new Date(hoje+"T12:00:00"); d2.setDate(d2.getDate()-2);
+  const [it, sg, di] = await Promise.all([
+    sb.from("aves_itens").select("*").eq("ativo",true).order("ordem"),
+    sb.from("aves_sugestoes").select("*").eq("data",hoje),
+    sb.from("aves_diario").select("data,loja,id_produto,venda,estoque_virtual").in("data",[dISO(d1),dISO(d2)])
+  ]);
+  for(const r of [it,sg,di]) if(r.error) throw r.error;
+  cache.itens = it.data; cache.porId = Object.fromEntries(it.data.map(i=>[i.id_produto,i]));
+  cache.sug = sg.data; cache.hoje = hoje;
+  cache.vendas = {};   // (loja|pid) -> {d1,d2}
+  for(const r of di.data){
+    const k=r.loja+"|"+r.id_produto;
+    cache.vendas[k] = cache.vendas[k]||{};
+    if(r.data===dISO(d1)) cache.vendas[k].d1=r.venda;
+    if(r.data===dISO(d2)) cache.vendas[k].d2=r.venda;
+  }
+}
+function sugDe(loja,pid){return cache.sug.find(s=>s.loja===loja&&s.id_produto===pid);}
+
+/* ================= OPERADOR ================= */
+function vOperador(){
+  const loja = sess.loja;
+  $("#hSub").textContent = LOJAS[loja]||loja;
+  const semSync = !cache.sug.some(s=>s.loja===loja);
+  let h = `<div class="tabs">
+    <button class="tab ${tela==='pedido'?'on':''}" onclick="tela='pedido';render()">📋 Pedido de hoje</button>
+    <button class="tab ${tela==='balanco'?'on':''}" onclick="tela='balanco';render()">⚖️ Minibalanço</button>
+  </div>`;
+  if(semSync) h+=`<div class="alert">A sugestão de hoje ainda não foi gerada (sync roda às 06h). Fale com o comprador se passar das 07h.</div>`;
+  if(tela==="balanco") return h+vBalanco(loja);
+
+  h+=`<div class="alert" style="border-color:var(--amber)">Confira cada item e registre a <b>sua</b> sugestão até as <b>08h00</b>. Se discordar do estoque virtual ou da sugestão, explique o motivo — o comprador vai ler.</div>`;
+  h+=grupoItens(loja,true);
+  $("#fbar").classList.remove("hide");
+  $("#fbar").innerHTML=`<button class="bt-p" onclick="salvarOperador()">💾 Enviar minha sugestão</button>`;
+  return h;
+}
+function grupoItens(loja,editavel){
+  const blocos=[["granel","🥩 Granel (kg)"],["galeto","🍗 Galeto (unidade)"],["bandeja","🧺 Bandejas"]];
+  let h="";
+  for(const [tipo,titulo] of blocos){
+    const its=cache.itens.filter(i=>i.tipo===tipo);
+    if(!its.length) continue;
+    h+=`<h2>${titulo}</h2>`;
+    for(const it of its){
+      const s=sugDe(loja,it.id_produto)||{};
+      const v=cache.vendas[loja+"|"+it.id_produto]||{};
+      const u=unidade(it), up=unidadePedido(it);
+      const conv = it.tipo==="bandeja"&&it.unidades_caixa?`<small>${fmt(it.unidades_caixa,0)} bdj/cx</small>`:"<small>&nbsp;</small>";
+      h+=`<div class="item" id="it${it.id_produto}">
+        <div class="nome">${esc(it.descricao)}<span class="forn ${it.fornecedor}">${it.fornecedor==="natto"?"NATTO":"MAURICEA"}</span></div>
+        <div class="grid">
+          <div class="g"><div class="v">${fmt(v.d2)}</div><div class="l">venda −2d</div></div>
+          <div class="g"><div class="v">${fmt(v.d1)}</div><div class="l">venda ontem</div></div>
+          <div class="g"><div class="v" style="color:var(--navy2)">${fmt(s.estoque_virtual)}</div><div class="l">estoque ${u}</div></div>
+          <div class="g"><div class="v">${fmt(s.prev_d1)} / ${fmt(s.prev_d2)}</div><div class="l">prev +1d / +2d</div></div>
+        </div>
+        <div class="sug">
+          <div class="sis">${fmt(s.sug_sistema)} ${up} ${conv}</div>
+          ${editavel?`<div style="display:flex;align-items:center;gap:6px">→ minha:
+            <input type="number" min="0" step="1" id="op${it.id_produto}"
+              value="${s.sug_operador??""}" placeholder="${fmt(s.sug_sistema)}"
+              oninput="mostraJust(${it.id_produto},${s.sug_sistema??0})"> ${up}</div>`:""}
+        </div>
+        ${editavel?`<textarea id="ju${it.id_produto}" class="${(s.justificativa_operador||difere(s))?"":"hide"}"
+          placeholder="Explique: por que discorda do estoque/sugestão? (obrigatório se mudar)">${esc(s.justificativa_operador||"")}</textarea>`:""}
+      </div>`;
+    }
+  }
+  return h;
+}
+function difere(s){return s.sug_operador!==null&&s.sug_operador!==undefined&&Number(s.sug_operador)!==Number(s.sug_sistema);}
+function mostraJust(pid,sis){
+  const v=$("#op"+pid).value;
+  $("#ju"+pid).classList.toggle("hide", v===""||Number(v)===Number(sis));
+}
+async function salvarOperador(){
+  const loja=sess.loja, ups=[];
+  for(const it of cache.itens){
+    const el=$("#op"+it.id_produto); if(!el) continue;
+    const s=sugDe(loja,it.id_produto); if(!s) continue;
+    if(el.value==="") continue;
+    const val=Number(el.value), ju=$("#ju"+it.id_produto).value.trim();
+    if(val!==Number(s.sug_sistema)&&ju.length<5){
+      el.scrollIntoView({block:"center"});
+      return alert(`"${it.descricao}": você mudou a sugestão — escreva a justificativa (mín. 5 letras).`);
+    }
+    ups.push({data:cache.hoje,loja,id_produto:it.id_produto,sug_operador:val,
+      justificativa_operador:ju||null,operador_login:sess.id,operador_em:new Date().toISOString()});
+  }
+  if(!ups.length) return alert("Nenhuma sugestão preenchida.");
+  const {error}=await sb.from("aves_sugestoes").upsert(ups,{onConflict:"data,loja,id_produto"});
+  if(error) return alert("Erro ao salvar: "+error.message);
+  alert(`✅ ${ups.length} itens enviados ao comprador.`);
+  await carregar(); render();
+}
+/* ---- minibalanço ---- */
+function vBalanco(loja){
+  $("#fbar").classList.remove("hide");
+  $("#fbar").innerHTML=`<button class="bt-s" onclick="salvarBalanco()">⚖️ Gravar contagem</button>`;
+  let h=`<div class="alert">Conte o estoque físico e digite abaixo. A contagem vira o novo ponto zero do estoque virtual (a partir do próximo sync). Bandeja em <b>bandejas</b>, granel em <b>kg</b>, galeto em <b>unidades</b>.</div>`;
+  for(const it of cache.itens){
+    const s=sugDe(loja,it.id_produto)||{};
+    h+=`<div class="item"><div class="nome">${esc(it.descricao)}</div>
+      <div class="sug"><span class="muted">virtual: <b>${fmt(s.estoque_virtual)}</b> ${unidade(it)}</span>
+      <input type="number" min="0" step="0.1" id="bl${it.id_produto}" placeholder="contagem"> ${unidade(it)}</div></div>`;
+  }
+  return h;
+}
+async function salvarBalanco(){
+  const loja=sess.loja, rows=[];
+  for(const it of cache.itens){
+    const el=$("#bl"+it.id_produto); if(!el||el.value==="") continue;
+    const s=sugDe(loja,it.id_produto)||{};
+    rows.push({data:cache.hoje,loja,id_produto:it.id_produto,contagem:Number(el.value),
+      estoque_anterior:s.estoque_virtual??null,usuario:sess.id});
+  }
+  if(!rows.length) return alert("Nenhuma contagem digitada.");
+  if(!confirm(`Gravar contagem de ${rows.length} itens? Isso rebaseia o estoque virtual.`)) return;
+  const {error}=await sb.from("aves_minibalanco").upsert(rows,{onConflict:"data,loja,id_produto"});
+  if(error) return alert("Erro: "+error.message);
+  alert("✅ Minibalanço gravado. O estoque virtual será ajustado no próximo sync (06h).");
+  tela="pedido"; render();
+}
+
+/* ================= COMPRADOR ================= */
+function vComprador(){
+  $("#hSub").textContent="Comprador";
+  lojaSel = lojaSel||Object.keys(LOJAS)[0];
+  let h=`<div class="chips">${Object.keys(LOJAS).map(l=>
+    `<span class="chip ${l===lojaSel?'on':''}" onclick="lojaSel='${l}';render()">${l}</span>`).join("")}</div>`;
+  const semSync=!cache.sug.some(s=>s.loja===lojaSel);
+  if(semSync) h+=`<div class="alert">Sem sugestão de hoje para ${lojaSel} — o sync das 06h ainda não rodou.</div>`;
+  const pend=cache.sug.filter(s=>s.loja===lojaSel&&s.sug_operador===null).length;
+  const tot=cache.sug.filter(s=>s.loja===lojaSel).length;
+  h+=`<div class="card muted">Operador de ${lojaSel}: <b>${tot-pend}/${tot}</b> itens com sugestão registrada.
+      Prazo do fornecedor: <b>09h00</b>.</div>`;
+  h+=`<div class="tblwrap"><table><tr><th>Item</th><th>Est.</th><th>Prev 2d</th><th>Sist.</th><th>Oper.</th><th>Pedido</th></tr>`;
+  const ordenados=[...cache.itens].sort((a,b)=>(a.grupo||"").localeCompare(b.grupo||"")||(a.ordem-b.ordem));
+  let gAnt=null;
+  for(const it of ordenados){
+    const s=sugDe(lojaSel,it.id_produto)||{};
+    if(it.grupo!==gAnt){gAnt=it.grupo;
+      h+=`<tr><td colspan="6" style="background:var(--bg);font-weight:700;font-size:11px;text-transform:uppercase;color:var(--mut)">${esc(it.grupo||"outros")}</td></tr>`;}
+    const up=unidadePedido(it);
+    h+=`<tr>
+      <td><span class="forn ${it.fornecedor}" style="margin-left:0">${it.fornecedor==="natto"?"N":"M"}</span>
+          ${esc(it.descricao.replace(/NATTO|MAURICEA/g,"").replace(/\s+/g," "))}
+          ${s.justificativa_operador?`<div class="just">💬 ${esc(s.justificativa_operador)}</div>`:""}</td>
+      <td>${fmt(s.estoque_virtual)}</td>
+      <td>${fmt((s.prev_d1||0)+(s.prev_d2||0))}</td>
+      <td><b>${fmt(s.sug_sistema)}</b></td>
+      <td>${s.sug_operador===null||s.sug_operador===undefined?"—":`<b class="${difere(s)?"neg":"pos"}">${fmt(s.sug_operador)}</b>`}</td>
+      <td><input type="number" min="0" step="1" style="width:64px;padding:6px" id="pd${it.id_produto}"
+          value="${s.pedido_final??""}" placeholder="${fmt(s.sug_operador??s.sug_sistema)}"> ${up}</td>
+    </tr>`;
+  }
+  h+=`</table></div>`;
+  $("#fbar").classList.remove("hide");
+  $("#fbar").innerHTML=`
+    <button class="bt-s" onclick="salvarComprador()">💾 Salvar ${lojaSel}</button>
+    <button class="bt-p" onclick="exportarTXT()">📄 Exportar TXT</button>`;
+  return h;
+}
+async function salvarComprador(){
+  const ups=[];
+  for(const it of cache.itens){
+    const el=$("#pd"+it.id_produto); if(!el||el.value==="") continue;
+    ups.push({data:cache.hoje,loja:lojaSel,id_produto:it.id_produto,pedido_final:Number(el.value),
+      comprador_login:sess.id,comprador_em:new Date().toISOString()});
+  }
+  if(!ups.length) return alert("Nenhum pedido digitado.");
+  const {error}=await sb.from("aves_sugestoes").upsert(ups,{onConflict:"data,loja,id_produto"});
+  if(error) return alert("Erro: "+error.message);
+  alert(`✅ Pedido de ${lojaSel} salvo (${ups.length} itens).`);
+  await carregar(); render();
+}
+async function exportarTXT(){
+  await carregar();                       // pega o que está salvo de todas as lojas
+  const hoje=cache.hoje, [a,m,d]=hoje.split("-");
+  for(const forn of ["natto","mauricea"]){
+    const nome=forn==="natto"?"NATTO (FRIGORIFICO BLJ)":"MAURICEA ALIMENTOS";
+    let txt=`PEDIDO AVES RESFRIADAS - RENDE MAIS\nFORNECEDOR: ${nome}\nDATA DO PEDIDO: ${d}/${m}/${a}  (entrega: dia seguinte)\n`;
+    let tem=false;
+    for(const loja of Object.keys(LOJAS)){
+      const linhas=[];
+      for(const it of cache.itens.filter(i=>i.fornecedor===forn)){
+        const s=sugDe(loja,it.id_produto);
+        const q=s?(s.pedido_final??null):null;
+        if(!q) continue;
+        const up=unidadePedido(it).toUpperCase();
+        const extra=it.tipo==="bandeja"&&it.unidades_caixa?` (${fmt(it.unidades_caixa,0)} bdj de ${fmt(it.peso_bandeja_kg,3)}kg/cx)`:"";
+        linhas.push(`${String(it.id_produto).padEnd(8)} ${it.descricao.padEnd(42).slice(0,42)} ${String(fmt(q)).padStart(6)} ${up}${extra}`);
+      }
+      if(linhas.length){tem=true;
+        txt+=`\n================ ${LOJAS[loja].toUpperCase()} ================\n`+linhas.join("\n")+"\n";}
+    }
+    if(!tem) continue;
+    const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});
+    const aEl=document.createElement("a");
+    aEl.href=URL.createObjectURL(blob);
+    aEl.download=`pedido_aves_${forn}_${hoje}.txt`;
+    aEl.click();
+  }
+  alert("TXT gerado por fornecedor (só itens com pedido digitado e salvo).");
+}
+
+/* ================= FLUXO ================= */
+function render(){
+  $("#fbar").classList.add("hide");
+  $("#app").innerHTML = PAPEIS_COMPRADOR.includes(sess.papel)?vComprador():vOperador();
+}
+async function iniciar(){
+  $("#hUser").textContent=sess.nome.split(" ")[0];
+  $("#app").innerHTML=`<p class="center muted">Carregando…</p>`;
+  try{ await carregar(); render(); }
+  catch(e){ $("#app").innerHTML=`<div class="alert">Erro ao carregar: ${esc(e.message||e)}</div>`; }
+}
+(async()=>{
+  const s=localStorage.getItem("aves_sess");
+  if(s){
+    const {id}=JSON.parse(s);
+    const {data}=await sb.from("usuarios").select("*").eq("id",id).single();
+    if(data&&data.ativo){ sess=data; return iniciar(); }
+  }
+  telaLogin();
+})();
+</script>
+</body>
+</html>
