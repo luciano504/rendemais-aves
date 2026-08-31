@@ -1,0 +1,31 @@
+name: Sync Aves (VR -> App)
+
+on:
+  schedule:
+    - cron: "0 9 * * *"    # 06h00 Recife (09h00 UTC), todos os dias
+  workflow_dispatch:
+
+concurrency:
+  group: aves
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install --quiet requests pandas
+
+      - name: Sync Aves
+        env:
+          VR_URL: ${{ secrets.VR_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/sync_aves.py
