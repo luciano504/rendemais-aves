@@ -105,7 +105,15 @@ function dISO(d){return d.toISOString().slice(0,10);}
 function fmt(n,dec){ if(n===null||n===undefined) return "—";
   return Number(n).toLocaleString("pt-BR",{minimumFractionDigits:dec??0,maximumFractionDigits:dec??1});}
 function unidade(it){return it.tipo==="granel"?"kg":it.tipo==="galeto"?"un":"bdj";}
-function unidadePedido(it){return it.tipo==="bandeja"?"cx":it.tipo==="galeto"?"un":"kg";}
+function unidadePedido(it){return "cx";}   // fornecedor só fatura caixa fechada
+// quantas unidades de venda (kg/un/bdj) cabem numa caixa mãe
+function porCaixa(it){return Number(it.unidades_caixa)||1;}
+// texto do equivalente: "3 cx = 60 kg"
+function equiv(it,cx){
+  if(cx===""||cx===null||cx===undefined) return "";
+  const n=Number(cx); if(!n) return "";
+  return `= ${fmt(n*porCaixa(it),1)} ${unidade(it)}`;
+}
 function dataBR(iso){const [a,m,d]=iso.split("-");return `${d}/${m}`;}
 function esc(t){return String(t??"").replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));}
 
@@ -228,7 +236,7 @@ function grupoItens(loja,editavel){
       const s=sugDe(loja,it.id_produto)||{};
       const v=cache.vendas[loja+"|"+it.id_produto]||{};
       const u=unidade(it), up=unidadePedido(it);
-      const conv = it.tipo==="bandeja"&&it.unidades_caixa?`<small>${fmt(it.unidades_caixa,0)} bdj/cx</small>`:"<small>&nbsp;</small>";
+      const conv = `<small>${fmt(porCaixa(it),1)} ${u}/cx</small>`;
       h+=`<div class="item" id="it${it.id_produto}">
         <div class="nome">${esc(it.descricao)}<span class="forn ${it.fornecedor}">${it.fornecedor==="natto"?"NATTO":"MAURICEA"}</span></div>
         <div class="grid">
@@ -242,7 +250,8 @@ function grupoItens(loja,editavel){
           ${editavel?`<div style="display:flex;align-items:center;gap:6px">→ minha:
             <input type="number" min="0" step="1" id="op${it.id_produto}"
               value="${s.sug_operador??""}" placeholder="${fmt(s.sug_sistema)}"
-              oninput="mostraJust(${it.id_produto},${s.sug_sistema??0})"> ${up}</div>`:""}
+              oninput="mostraJust(${it.id_produto},${s.sug_sistema??0})"> ${up}
+            <span class="muted" id="eq${it.id_produto}">${equiv(it,s.sug_operador??s.sug_sistema)}</span></div>`:""}
         </div>
         ${editavel?`<textarea id="ju${it.id_produto}" class="${(s.justificativa_operador||difere(s))?"":"hide"}"
           placeholder="Explique: por que discorda do estoque/sugestão? (obrigatório se mudar)">${esc(s.justificativa_operador||"")}</textarea>`:""}
@@ -255,6 +264,7 @@ function difere(s){return s.sug_operador!==null&&s.sug_operador!==undefined&&Num
 function mostraJust(pid,sis){
   const v=$("#op"+pid).value;
   $("#ju"+pid).classList.toggle("hide", v===""||Number(v)===Number(sis));
+  const eq=$("#eq"+pid); if(eq) eq.textContent=equiv(cache.porId[pid],v);
 }
 async function salvarOperador(){
   const loja=sess.loja, ups=[];
@@ -340,8 +350,10 @@ function vComprador(){
       <td>${fmt((s.prev_d1||0)+(s.prev_d2||0))}</td>
       <td><b>${fmt(s.sug_sistema)}</b></td>
       <td>${s.sug_operador===null||s.sug_operador===undefined?"—":`<b class="${difere(s)?"neg":"pos"}">${fmt(s.sug_operador)}</b>`}</td>
-      <td><input type="number" min="0" step="1" style="width:64px;padding:6px" id="pd${it.id_produto}"
-          value="${s.pedido_final??""}" placeholder="${fmt(s.sug_operador??s.sug_sistema)}"> ${up}</td>
+      <td><input type="number" min="0" step="1" style="width:58px;padding:6px" id="pd${it.id_produto}"
+          value="${s.pedido_final??""}" placeholder="${fmt(s.sug_operador??s.sug_sistema)}"
+          oninput="eqComp(${it.id_produto})"> cx
+          <div class="muted" style="font-size:11px" id="eqc${it.id_produto}">${equiv(it,s.pedido_final??s.sug_operador??s.sug_sistema)}</div></td>
     </tr>`;
   }
   h+=`</table></div>`;
@@ -350,6 +362,9 @@ function vComprador(){
     <button class="bt-s" onclick="salvarComprador()">💾 Salvar ${lojaSel}</button>
     <button class="bt-p" onclick="exportarTXT()">📄 Exportar TXT</button>`;
   return h;
+}
+function eqComp(pid){
+  const el=$("#eqc"+pid); if(el) el.textContent=equiv(cache.porId[pid], $("#pd"+pid).value);
 }
 async function salvarComprador(){
   const ups=[];
@@ -364,34 +379,37 @@ async function salvarComprador(){
   alert(`✅ Pedido de ${lojaSel} salvo (${ups.length} itens).`);
   await carregar(); render();
 }
+/* TXT no LAYOUT PEDIDO do VR (separador "|"):
+   CODIGO INTERNO | QUANTIDADE | EMBALAGEM | PRECO
+   Um arquivo por LOJA x FORNECEDOR — a loja e o fornecedor são escolhidos
+   na tela do VR ao importar, por isso não vão dentro do arquivo. */
 async function exportarTXT(){
   await carregar();                       // pega o que está salvo de todas as lojas
-  const hoje=cache.hoje, [a,m,d]=hoje.split("-");
+  const hoje=cache.hoje;
+  let ger=0, itens=0;
   for(const forn of ["natto","mauricea"]){
-    const nome=forn==="natto"?"NATTO (FRIGORIFICO BLJ)":"MAURICEA ALIMENTOS";
-    let txt=`PEDIDO AVES RESFRIADAS - RENDE MAIS\nFORNECEDOR: ${nome}\nDATA DO PEDIDO: ${d}/${m}/${a}  (entrega: dia seguinte)\n`;
-    let tem=false;
     for(const loja of Object.keys(LOJAS)){
       const linhas=[];
       for(const it of cache.itens.filter(i=>i.fornecedor===forn)){
         const s=sugDe(loja,it.id_produto);
         const q=s?(s.pedido_final??null):null;
-        if(!q) continue;
-        const up=unidadePedido(it).toUpperCase();
-        const extra=it.tipo==="bandeja"&&it.unidades_caixa?` (${fmt(it.unidades_caixa,0)} bdj de ${fmt(it.peso_bandeja_kg,3)}kg/cx)`:"";
-        linhas.push(`${String(it.id_produto).padEnd(8)} ${it.descricao.padEnd(42).slice(0,42)} ${String(fmt(q)).padStart(6)} ${up}${extra}`);
+        if(!q) continue;                              // só o que o comprador fechou
+        const emb=fmt(porCaixa(it),3).replace(".","").replace(",",".");
+        const custo=it.ultimo_custo?Number(it.ultimo_custo).toFixed(4):"0";
+        linhas.push(`${it.id_produto}|${Number(q)}|${emb}|${custo}`);
+        itens++;
       }
-      if(linhas.length){tem=true;
-        txt+=`\n================ ${LOJAS[loja].toUpperCase()} ================\n`+linhas.join("\n")+"\n";}
+      if(!linhas.length) continue;
+      const blob=new Blob([linhas.join("\r\n")+"\r\n"],{type:"text/plain;charset=utf-8"});
+      const aEl=document.createElement("a");
+      aEl.href=URL.createObjectURL(blob);
+      aEl.download=`pedido_${loja}_${forn}_${hoje}.txt`;
+      aEl.click();
+      ger++;
     }
-    if(!tem) continue;
-    const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});
-    const aEl=document.createElement("a");
-    aEl.href=URL.createObjectURL(blob);
-    aEl.download=`pedido_aves_${forn}_${hoje}.txt`;
-    aEl.click();
   }
-  alert("TXT gerado por fornecedor (só itens com pedido digitado e salvo).");
+  if(!ger) return alert("Nenhum pedido salvo para exportar. Digite as caixas e clique em Salvar antes.");
+  alert(`✅ ${ger} arquivo(s) gerado(s), ${itens} itens.\n\nUm arquivo por LOJA x FORNECEDOR, no LAYOUT PEDIDO do VR (código|qtd|embalagem|preço).\nNo VR: Pedido de Compra → Incluir (escolher fornecedor e loja) → Gerar → Importar → Arquivo.`);
 }
 
 /* ================= FLUXO ================= */
