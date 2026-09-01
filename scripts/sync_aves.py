@@ -211,6 +211,21 @@ for _, r in vr_est.iterrows():
     n_fb += 1
 RESUMO.append(f"Sem minibalanço: estoque do VR assumido para {n_fb} loja x item")
 
+# ---- último custo unitário de cada item (vai no TXT de importação do VR)
+custos = query_vr(f"""
+    SELECT i.id_produto, i.custocomimposto
+    FROM public.notaentradaitem i JOIN public.notaentrada n ON n.id = i.id_notaentrada
+    WHERE i.id_produto IN ({ids_app_sql}) AND n.dataentrada >= current_date - 60
+      AND n.dataentrada = (SELECT max(n2.dataentrada) FROM public.notaentrada n2
+                           JOIN public.notaentradaitem i2 ON i2.id_notaentrada = n2.id
+                           WHERE i2.id_produto = i.id_produto)""")
+cst_rows = []
+for pid, g in (custos.groupby("id_produto") if len(custos) else []):
+    if int(pid) in POR_ID:
+        cst_rows.append({"id_produto": int(pid), "ultimo_custo": round(float(g["custocomimposto"].max()), 4)})
+sb_upsert("aves_itens", cst_rows, "id_produto")
+RESUMO.append(f"Último custo atualizado em {len(cst_rows)} itens")
+
 # ---------------------------------------------------------------- 5. fatores do DDV
 df = pd.DataFrame(diario)
 if len(df):
@@ -273,14 +288,10 @@ for (loja, pid), (vmd, f_dow, f_sem) in prev_por_chave.items():
     # teto de validade: estoque após a chegada não pode passar de validade_dias de venda
     teto = max(float(it["validade_dias"]) * vmd - max((est or 0) - p0, 0), 0)
     bruto = max(min(falta, teto), 0.0)
-    if it["tipo"] == "bandeja" and it.get("unidades_caixa"):
-        cx = float(it["unidades_caixa"])
-        sug = math.floor(bruto / cx + 0.5)          # arredonda para caixa mãe
-        if sug == 0 and falta > 0.6 * cx: sug = 1   # falta relevante garante 1 caixa
-    elif it["tipo"] == "galeto":
-        sug = round(bruto)                          # unidades
-    else:
-        sug = round(bruto)                          # granel: kg
+    # o fornecedor só fatura caixa fechada: TODA sugestão sai em nº de caixas mãe
+    cx = float(it.get("unidades_caixa") or 1)
+    sug = math.floor(bruto / cx + 0.5)              # arredonda para a caixa mais próxima
+    if sug == 0 and falta > 0.6 * cx: sug = 1       # falta relevante garante 1 caixa
     sug_rows.append({"data": HOJE.isoformat(), "loja": loja, "id_produto": pid,
                      "estoque_virtual": round(est, 3) if est is not None else None,
                      "prev_hoje": round(p0, 2), "prev_d1": round(p1, 2), "prev_d2": round(p2, 2),
