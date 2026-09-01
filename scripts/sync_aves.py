@@ -205,17 +205,27 @@ RESUMO.append(f"Estoque virtual recalculado para {len(estoque_atual)} loja x ite
               f"({len(base)} com minibalanço)")
 
 # ---- fallback: sem minibalanço, assume o estoque atual do VR (produtocomplemento)
+# CONSOLIDA os códigos irmãos: no VR o galeto entra no 371 e sai pelo 3420/3421/3422,
+# então o código de entrada fica inflado e os de venda ficam negativos. Somando os dois
+# (o meio galeto valendo 0,5) chega-se perto do estoque físico enquanto o vínculo de
+# baixa não é ajustado no VR.
 vr_est = query_vr(f"""
     SELECT id_loja, id_produto, estoque FROM public.produtocomplemento
-    WHERE id_loja IN ({lojas_sql}) AND id_produto IN ({ids_app_sql})""")
-n_fb = 0
+    WHERE id_loja IN ({lojas_sql}) AND id_produto IN ({ids_sql})""")
+cons = defaultdict(float)
 for _, r in vr_est.iterrows():
     loja = LOJAS.get(int(r.id_loja)); pid = int(r.id_produto)
-    if not loja or pid not in POR_ID: continue
-    if (loja, pid) in base: continue            # já tem minibalanço: mantém a cadeia
-    estoque_atual[(loja, pid)] = max(float(r.estoque or 0), 0.0)
+    if not loja: continue
+    fator = 1.0
+    if pid in VENDA_MAP: pid, fator = VENDA_MAP[pid]
+    if pid not in POR_ID: continue
+    cons[(loja, pid)] += float(r.estoque or 0) * fator
+n_fb = 0
+for chave, val in cons.items():
+    if chave in base: continue                  # já tem minibalanço: a contagem manda
+    estoque_atual[chave] = max(val, 0.0)
     n_fb += 1
-RESUMO.append(f"Sem minibalanço: estoque do VR assumido para {n_fb} loja x item")
+RESUMO.append(f"Sem minibalanço: estoque do VR (códigos irmãos consolidados) para {n_fb} loja x item")
 
 # ---- último custo unitário de cada item (vai no TXT de importação do VR)
 custos = query_vr(f"""
