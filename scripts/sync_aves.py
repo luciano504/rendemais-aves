@@ -68,6 +68,12 @@ def sb_get(table, params):
         if len(rows) < 1000: return out
         offset += 1000
 
+def sb_patch(table, filtro, campos):
+    r = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?{filtro}",
+                       headers=sb_headers(), data=json.dumps(campos), timeout=60)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Patch {table}: {r.status_code} {r.text[:200]}")
+
 def sb_upsert(table, rows, on_conflict):
     if not rows: return
     for i in range(0, len(rows), 500):
@@ -213,18 +219,23 @@ RESUMO.append(f"Sem minibalanço: estoque do VR assumido para {n_fb} loja x item
 
 # ---- último custo unitário de cada item (vai no TXT de importação do VR)
 custos = query_vr(f"""
-    SELECT i.id_produto, i.custocomimposto
+    SELECT i.id_produto, max(n.dataentrada) AS dt, max(i.custocomimposto) AS custo
     FROM public.notaentradaitem i JOIN public.notaentrada n ON n.id = i.id_notaentrada
     WHERE i.id_produto IN ({ids_app_sql}) AND n.dataentrada >= current_date - 60
-      AND n.dataentrada = (SELECT max(n2.dataentrada) FROM public.notaentrada n2
-                           JOIN public.notaentradaitem i2 ON i2.id_notaentrada = n2.id
-                           WHERE i2.id_produto = i.id_produto)""")
-cst_rows = []
-for pid, g in (custos.groupby("id_produto") if len(custos) else []):
-    if int(pid) in POR_ID:
-        cst_rows.append({"id_produto": int(pid), "ultimo_custo": round(float(g["custocomimposto"].max()), 4)})
-sb_upsert("aves_itens", cst_rows, "id_produto")
-RESUMO.append(f"Último custo atualizado em {len(cst_rows)} itens")
+    GROUP BY i.id_produto, n.dataentrada
+    ORDER BY i.id_produto, n.dataentrada DESC""")
+n_cst = 0
+vistos = set()
+for _, r in (custos.iterrows() if len(custos) else []):
+    pid = int(r.id_produto)                       # a 1ª linha de cada item é a entrada mais recente
+    if pid in vistos or pid not in POR_ID: continue
+    vistos.add(pid)
+    try:
+        sb_patch("aves_itens", f"id_produto=eq.{pid}", {"ultimo_custo": round(float(r.custo), 4)})
+        n_cst += 1
+    except Exception as e:
+        print(f"custo {pid}: {e}")
+RESUMO.append(f"Último custo atualizado em {n_cst} itens")
 
 # ---------------------------------------------------------------- 5. fatores do DDV
 df = pd.DataFrame(diario)
