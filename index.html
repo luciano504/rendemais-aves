@@ -158,6 +158,45 @@ async function carregar(){
 }
 function sugDe(loja,pid){return cache.sug.find(s=>s.loja===loja&&s.id_produto===pid);}
 
+/* ---- histórico de 4 semanas ---- */
+async function carregarHist(loja){
+  const d0=new Date(cache.hoje+"T12:00:00"); d0.setDate(d0.getDate()-28);
+  const {data,error}=await sb.from("aves_diario").select("data,id_produto,venda")
+    .eq("loja",loja).gte("data",dISO(d0)).order("data");
+  if(error) throw error;
+  cache.hist={loja, rows:data};
+}
+function vHistorico(loja){
+  if(!cache.hist||cache.hist.loja!==loja){
+    carregarHist(loja).then(()=>render()).catch(e=>alert("Erro ao carregar histórico: "+e.message));
+    return `<p class="center muted">Carregando as últimas 4 semanas…</p>`;
+  }
+  const hoje=new Date(cache.hoje+"T12:00:00");
+  const idx={}; for(const r of cache.hist.rows) idx[r.data+"|"+r.id_produto]=Number(r.venda);
+  const diaAtras=k=>{const d=new Date(hoje); d.setDate(d.getDate()-k); return dISO(d);};
+  const dowNome=DOW_NOMES[(hoje.getDay())];
+  let h=`<div class="card muted">Vendas de <b>${LOJAS[loja]||loja}</b> nas últimas 4 semanas.
+    S‑4…S‑1 = total de cada semana (S‑1 é a mais recente). Coluna "${dowNome}" = venda nas últimas 4 ${dowNome}s (da mais antiga → mais recente).</div>`;
+  h+=`<div class="tblwrap"><table><tr><th>Item</th><th>S‑4</th><th>S‑3</th><th>S‑2</th><th>S‑1</th><th>méd/dia</th><th>${dowNome}</th></tr>`;
+  for(const it of cache.itens){
+    const sem=[0,0,0,0]; let tot=0;
+    for(let k=1;k<=28;k++){
+      const v=idx[diaAtras(k)+"|"+it.id_produto]||0;
+      sem[Math.floor((k-1)/7)]+=v; tot+=v;
+    }
+    const mesmoDia=[28,21,14,7].map(k=>fmt(idx[diaAtras(k)+"|"+it.id_produto]||0)).join(" · ");
+    h+=`<tr>
+      <td><span class="forn ${it.fornecedor}" style="margin-left:0">${it.fornecedor==="natto"?"N":"M"}</span>
+        ${esc(it.descricao.replace(/NATTO|MAURICEA/g,"").replace(/\s+/g," "))} <span class="muted">(${unidade(it)})</span></td>
+      <td>${fmt(sem[3])}</td><td>${fmt(sem[2])}</td><td>${fmt(sem[1])}</td><td><b>${fmt(sem[0])}</b></td>
+      <td>${fmt(tot/28,1)}</td>
+      <td style="white-space:nowrap">${mesmoDia}</td>
+    </tr>`;
+  }
+  h+=`</table></div>`;
+  return h;
+}
+
 /* ================= OPERADOR ================= */
 function vOperador(){
   const loja = sess.loja;
@@ -166,7 +205,9 @@ function vOperador(){
   let h = `<div class="tabs">
     <button class="tab ${tela==='pedido'?'on':''}" onclick="tela='pedido';render()">📋 Pedido de hoje</button>
     <button class="tab ${tela==='balanco'?'on':''}" onclick="tela='balanco';render()">⚖️ Minibalanço</button>
+    <button class="tab ${tela==='hist'?'on':''}" onclick="tela='hist';render()">📈 4 semanas</button>
   </div>`;
+  if(tela==="hist") return h+vHistorico(loja);
   if(semSync) h+=`<div class="alert">A sugestão de hoje ainda não foi gerada (sync roda às 06h). Fale com o comprador se passar das 07h.</div>`;
   if(tela==="balanco") return h+vBalanco(loja);
 
@@ -271,9 +312,11 @@ function vComprador(){
   let h=`<div class="tabs">
     <button class="tab ${tela!=='balanco'?'on':''}" onclick="tela='pedido';render()">📋 Pedido de hoje</button>
     <button class="tab ${tela==='balanco'?'on':''}" onclick="tela='balanco';render()">⚖️ Minibalanço</button>
+    <button class="tab ${tela==='hist'?'on':''}" onclick="tela='hist';render()">📈 4 semanas</button>
   </div>`;
   h+=`<div class="chips">${Object.keys(LOJAS).map(l=>
     `<span class="chip ${l===lojaSel?'on':''}" onclick="lojaSel='${l}';render()">${l}</span>`).join("")}</div>`;
+  if(tela==="hist") return h+vHistorico(lojaSel);
   if(tela==="balanco") return h+vBalanco(lojaSel);
   const semSync=!cache.sug.some(s=>s.loja===lojaSel);
   if(semSync) h+=`<div class="alert">Sem sugestão de hoje para ${lojaSel} — o sync das 06h ainda não rodou.</div>`;
