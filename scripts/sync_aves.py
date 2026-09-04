@@ -315,7 +315,7 @@ WITH pf AS MATERIALIZED (
 ),
 nf AS MATERIALIZED (
   SELECT nfe.id_loja, nfe.id_fornecedor, nfe.numeronota, nfe.chavenfe,
-         nfe.dataentrada::date dt, (current_date - nfe.dataentrada::date) dias,
+         nfe.dataentrada::date emitida, (current_date - nfe.dataentrada::date) dias,
          nfe.valortotal, nfe.xml
   FROM public.notaentradanfe nfe
   WHERE nfe.dataentrada >= current_date - {TRANSITO_DIAS}
@@ -325,14 +325,14 @@ nf AS MATERIALIZED (
     AND NOT EXISTS (SELECT 1 FROM public.notaentrada n WHERE n.chavenfe = nfe.chavenfe)
 ),
 det AS MATERIALIZED (
-  SELECT nf.id_loja, nf.id_fornecedor, nf.numeronota, nf.chavenfe, nf.dt, nf.dias,
+  SELECT nf.id_loja, nf.id_fornecedor, nf.numeronota, nf.chavenfe, nf.emitida, nf.dias,
          nf.valortotal,
          ltrim(substring(d from '<cProd>([^<]*)'),'0') cod,
          substring(d from '<qCom>([^<]*)')::numeric kg
   FROM nf, regexp_split_to_table(nf.xml, '<det[ >]') d
   WHERE d LIKE '%<cProd>%'
 )
-SELECT det.id_loja, det.id_fornecedor, det.numeronota, det.chavenfe, det.dt, det.dias,
+SELECT det.id_loja, det.id_fornecedor, det.numeronota, det.chavenfe, det.emitida, det.dias,
        round(det.valortotal,2) valornf, pf.id_produto, sum(det.kg) kg
 FROM det JOIN pf ON pf.id_fornecedor = det.id_fornecedor AND pf.cod = det.cod
 GROUP BY 1,2,3,4,5,6,7,8""")
@@ -345,20 +345,20 @@ GROUP BY 1,2,3,4,5,6,7,8""")
     vistos, descartadas = {}, 0
     manter = set()
     for _, r in tr.sort_values("dias").iterrows():
-        k = (int(r.id_loja), int(r.id_fornecedor), float(r.valornf or 0))
-        ch = str(r.chavenfe)
+        k = (int(r["id_loja"]), int(r["id_fornecedor"]), float(r["valornf"] or 0))
+        ch = str(r["chavenfe"])
         if k in vistos:
-            if abs(int(r.dias) - vistos[k][1]) <= 3 and ch != vistos[k][0]:
+            if abs(int(r["dias"]) - vistos[k][1]) <= 3 and ch != vistos[k][0]:
                 descartadas += 1
                 continue                      # duplicata da mesma carga
-        vistos[k] = (ch, int(r.dias))
+        vistos[k] = (ch, int(r["dias"]))
         manter.add(ch)
 
     for _, r in tr.iterrows():
-        if str(r.chavenfe) not in manter:
+        if str(r["chavenfe"]) not in manter:
             continue
-        loja = LOJAS.get(int(r.id_loja))
-        pid  = int(r.id_produto)
+        loja = LOJAS.get(int(r["id_loja"]))
+        pid  = int(r["id_produto"])
         if not loja or pid not in POR_ID:
             continue
         it = POR_ID[pid]
@@ -366,22 +366,22 @@ GROUP BY 1,2,3,4,5,6,7,8""")
         if kg_un <= 0:
             continue
         # mesma conversão da entrada: congelado que vira resfriado perde peso
-        qtd = float(r.kg) / kg_un * float(it.get("entrada_fator") or 1.0)
+        qtd = float(r["kg"]) / kg_un * float(it.get("entrada_fator") or 1.0)
         # galeto se conta em unidade inteira, qualquer que seja o peso da ave;
         # se a nota vier com peso quebrado, arredonda para a unidade mais próxima
         if it["tipo"] == "galeto":
             qtd = float(round(qtd))
         cx  = qtd / float(it.get("unidades_caixa") or 1)
         transito_rows.append({
-            "loja": loja, "id_produto": pid, "numeronota": str(r.numeronota),
-            "emitida": str(r.dt)[:10], "dias": int(r.dias),
+            "loja": loja, "id_produto": pid, "numeronota": str(r["numeronota"]),
+            "emitida": str(r["emitida"])[:10], "dias": int(r["dias"]),
             "qtd": round(qtd, 3), "caixas": round(cx, 2),
             "fornecedor": it.get("fornecedor"),
             "atualizado_em": dt.datetime.utcnow().isoformat()})
         g = transito_por_chave[(loja, pid)]
         g["qtd"] += qtd
         g["cx"]  += cx
-        g["nfs"].append((str(r.numeronota), int(r.dias)))
+        g["nfs"].append((str(r["numeronota"]), int(r["dias"])))
 
     # a tabela é um retrato do momento: apaga tudo e regrava
     requests.delete(f"{SUPABASE_URL}/rest/v1/aves_transito?loja=neq.__nada__",
