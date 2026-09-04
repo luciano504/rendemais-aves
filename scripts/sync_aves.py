@@ -289,6 +289,112 @@ for loja in LOJAS.values():
 sb_upsert("aves_fatores", fatores_rows, "loja,id_produto")
 RESUMO.append(f"Fatores recalculados: {len(fatores_rows)} loja x item")
 
+# --------------------------------------------------- 5b. MERCADORIA EM TRÂNSITO
+# NF-e que o fornecedor já emitiu (o VR baixou da SEFAZ) e que ainda não virou
+# nota de entrada em nenhuma loja. É o que evita o pedido dobrado: a loja acha
+# que nada chegou, pede de novo, e depois chegam os dois.
+#
+# O XML da NF-e fica em notaentradanfe.xml; os itens saem dele por regex e o
+# código do fornecedor (cProd) vira id_produto pela tabela produtofornecedor.
+# A quantidade no XML SEMPRE vem em kg -> convertemos pela kg_por_unidade.
+TRANSITO_DIAS = 10
+
+transito_rows, transito_por_chave = [], defaultdict(lambda: {"qtd": 0.0, "cx": 0.0, "nfs": []})
+try:
+    lojas_ids = ",".join(str(k) for k in LOJAS)
+    forn_ids  = ",".join(str(f) for f in FORNECEDORES_VR)
+    ids_tr    = ",".join(str(i) for i in IDS_APP)
+    # CTEs MATERIALIZED: sem isso o Postgres empurra o join de texto para dentro
+    # do parse do XML e a consulta passa de 60 s.
+    tr = query_vr(f"""
+WITH pf AS MATERIALIZED (
+  SELECT id_fornecedor, ltrim(codigoexterno,'0') cod, min(id_produto) id_produto
+  FROM public.produtofornecedor
+  WHERE id_produto IN ({ids_tr}) AND id_fornecedor IN ({forn_ids})
+  GROUP BY 1,2
+),
+nf AS MATERIALIZED (
+  SELECT nfe.id_loja, nfe.id_fornecedor, nfe.numeronota, nfe.chavenfe,
+         nfe.dataentrada::date dt, (current_date - nfe.dataentrada::date) dias,
+         nfe.valortotal, nfe.xml
+  FROM public.notaentradanfe nfe
+  WHERE nfe.dataentrada >= current_date - {TRANSITO_DIAS}
+    AND nfe.id_fornecedor IN ({forn_ids})
+    AND nfe.id_loja IN ({lojas_ids})
+    AND length(coalesce(nfe.xml,'')) > 500
+    AND NOT EXISTS (SELECT 1 FROM public.notaentrada n WHERE n.chavenfe = nfe.chavenfe)
+),
+det AS MATERIALIZED (
+  SELECT nf.id_loja, nf.id_fornecedor, nf.numeronota, nf.chavenfe, nf.dt, nf.dias,
+         nf.valortotal,
+         ltrim(substring(d from '<cProd>([^<]*)'),'0') cod,
+         substring(d from '<qCom>([^<]*)')::numeric kg
+  FROM nf, regexp_split_to_table(nf.xml, '<det[ >]') d
+  WHERE d LIKE '%<cProd>%'
+)
+SELECT det.id_loja, det.id_fornecedor, det.numeronota, det.chavenfe, det.dt, det.dias,
+       round(det.valortotal,2) valornf, pf.id_produto, sum(det.kg) kg
+FROM det JOIN pf ON pf.id_fornecedor = det.id_fornecedor AND pf.cod = det.cod
+GROUP BY 1,2,3,4,5,6,7,8""")
+
+    # ---- a mesma carga chega em duas séries ----
+    # A Mauricea emite a mesma entrega em duas séries (10 e 11): mesmo CNPJ,
+    # mesmo valor, um dia de diferença, itens idênticos. Contar as duas dobraria
+    # o trânsito e faria a loja deixar de pedir o que precisa. Mantemos só a
+    # nota mais recente de cada (loja, fornecedor, valor) dentro de 3 dias.
+    vistos, descartadas = {}, 0
+    manter = set()
+    for _, r in tr.sort_values("dias").iterrows():
+        k = (int(r.id_loja), int(r.id_fornecedor), float(r.valornf or 0))
+        ch = str(r.chavenfe)
+        if k in vistos:
+            if abs(int(r.dias) - vistos[k][1]) <= 3 and ch != vistos[k][0]:
+                descartadas += 1
+                continue                      # duplicata da mesma carga
+        vistos[k] = (ch, int(r.dias))
+        manter.add(ch)
+
+    for _, r in tr.iterrows():
+        if str(r.chavenfe) not in manter:
+            continue
+        loja = LOJAS.get(int(r.id_loja))
+        pid  = int(r.id_produto)
+        if not loja or pid not in POR_ID:
+            continue
+        it = POR_ID[pid]
+        kg_un = float(it.get("kg_por_unidade") or it.get("peso_bandeja_kg") or 1.0)
+        if kg_un <= 0:
+            continue
+        # mesma conversão da entrada: congelado que vira resfriado perde peso
+        qtd = float(r.kg) / kg_un * float(it.get("entrada_fator") or 1.0)
+        # galeto se conta em unidade inteira, qualquer que seja o peso da ave;
+        # se a nota vier com peso quebrado, arredonda para a unidade mais próxima
+        if it["tipo"] == "galeto":
+            qtd = float(round(qtd))
+        cx  = qtd / float(it.get("unidades_caixa") or 1)
+        transito_rows.append({
+            "loja": loja, "id_produto": pid, "numeronota": str(r.numeronota),
+            "emitida": str(r.dt)[:10], "dias": int(r.dias),
+            "qtd": round(qtd, 3), "caixas": round(cx, 2),
+            "fornecedor": it.get("fornecedor"),
+            "atualizado_em": dt.datetime.utcnow().isoformat()})
+        g = transito_por_chave[(loja, pid)]
+        g["qtd"] += qtd
+        g["cx"]  += cx
+        g["nfs"].append((str(r.numeronota), int(r.dias)))
+
+    # a tabela é um retrato do momento: apaga tudo e regrava
+    requests.delete(f"{SUPABASE_URL}/rest/v1/aves_transito?loja=neq.__nada__",
+                    headers=sb_headers(), timeout=60)
+    sb_upsert("aves_transito", transito_rows, "loja,id_produto,numeronota")
+    RESUMO.append(f"Em trânsito: {len(transito_rows)} NF x item em "
+                  f"{len(set(r['loja'] for r in transito_rows))} lojas"
+                  + (f" ({descartadas} linhas de nota duplicada em 2ª série descartadas)"
+                     if descartadas else ""))
+except Exception as e:
+    # o trânsito é um aviso a mais: se falhar, o app continua funcionando sem ele
+    RESUMO.append(f"Em trânsito: FALHOU ({str(e)[:120]})")
+
 # ---------------------------------------------------------------- 6. sugestão do dia
 def prev(vmd, f_dow, f_sem, d):
     dow = (d.weekday() + 1) % 7                     # dom=0..sab=6
@@ -313,10 +419,28 @@ for (loja, pid), (vmd, f_dow, f_sem) in prev_por_chave.items():
     cx = float(it.get("unidades_caixa") or 1)
     sug = math.floor(bruto / cx + 0.5)              # arredonda para a caixa mais próxima
     if sug == 0 and falta > 0.6 * cx: sug = 1       # falta relevante garante 1 caixa
+    # o que já está faturado e a caminho desta loja
+    t = transito_por_chave.get((loja, pid))
+    t_qtd = round(t["qtd"], 3) if t else 0
+    t_cx  = round(t["cx"], 2) if t else 0
+    t_nf  = ", ".join(f"{n} ({d}d)" for n, d in sorted(t["nfs"], key=lambda x: x[1])) if t else None
+    t_dias = min(d for _, d in t["nfs"]) if t else None
+    # sugestão alternativa, já descontando o que vem a caminho.
+    # NÃO substitui a sugestão do sistema: uma NF pode ter sido cancelada ou já
+    # ter chegado sem casar a chave, e descontar sozinho causaria ruptura.
+    # Quem decide é o operador, vendo os dois números na tela.
+    sug_liq = sug
+    if t_cx > 0:
+        bruto_liq = max(bruto - t["qtd"], 0.0)
+        sug_liq = math.floor(bruto_liq / cx + 0.5)
+        if sug_liq == 0 and bruto_liq > 0.6 * cx: sug_liq = 1
     sug_rows.append({"data": HOJE.isoformat(), "loja": loja, "id_produto": pid,
                      "estoque_virtual": round(est, 3) if est is not None else None,
                      "prev_hoje": round(p0, 2), "prev_d1": round(p1, 2), "prev_d2": round(p2, 2),
-                     "sug_sistema": sug})
+                     "sug_sistema": sug,
+                     "transito_qtd": t_qtd, "transito_cx": t_cx,
+                     "transito_nf": t_nf, "transito_dias": t_dias,
+                     "sug_liquida": sug_liq})
 sb_upsert("aves_sugestoes", sug_rows, "data,loja,id_produto")
 RESUMO.append(f"Sugestões do dia {HOJE}: {len(sug_rows)} loja x item")
 
