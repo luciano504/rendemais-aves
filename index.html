@@ -44,6 +44,17 @@ h2{font-size:15px; margin:18px 0 8px; color:var(--mut); text-transform:uppercase
 .g{background:var(--bg); border-radius:8px; padding:6px 8px; text-align:center}
 .g .v{font-weight:700; font-size:15px}
 .g .l{font-size:10px; color:var(--mut); text-transform:uppercase}
+/* ---- mercadoria em trânsito: o aviso que evita o pedido dobrado ---- */
+.item.tem-transito{border-color:#c5221f; border-width:2px; box-shadow:0 0 0 3px rgba(197,34,31,.08)}
+.selo-tr{display:inline-block; background:#c5221f; color:#fff; font-size:10px; font-weight:700;
+ border-radius:10px; padding:2px 8px; margin-left:6px; white-space:nowrap}
+.selo-tr.velho{background:#985200}
+.transito{background:#fdeceb; border-left:4px solid #c5221f; border-radius:8px;
+ padding:8px 10px; margin:8px 0 4px; font-size:12px; line-height:1.45; color:#4a1512}
+.transito.velho{background:#fff3e0; border-left-color:#e37400; color:#4a2c00}
+.transito b{color:#a50e0b} .transito.velho b{color:#985200}
+.transito .nf{display:inline-block; background:#fff; border:1px solid rgba(0,0,0,.12);
+ border-radius:6px; padding:1px 7px; font-weight:700; margin-right:6px}
 .sug{display:flex; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap}
 .sug .sis{background:var(--navy); color:#fff; border-radius:10px; padding:8px 12px; font-weight:700; font-size:15px}
 .sug .sis small{font-weight:400; opacity:.75; display:block; font-size:10px}
@@ -108,6 +119,33 @@ function unidade(it){return it.tipo==="granel"?"kg":it.tipo==="galeto"?"un":"bdj
 function unidadePedido(it){return "cx";}   // fornecedor só fatura caixa fechada
 // quantas unidades de venda (kg/un/bdj) cabem numa caixa mãe
 function porCaixa(it){return Number(it.unidades_caixa)||1;}
+
+/* ---- MERCADORIA EM TRÂNSITO ----
+   O fornecedor já emitiu a NF-e e ela ainda não deu entrada na loja.
+   Serve para a loja NÃO pedir de novo e receber dobrado.            */
+function temTransito(s){return s && Number(s.transito_cx)>0;}
+function selo(s){
+  if(!temTransito(s)) return "";
+  const d=s.transito_dias;
+  return `<span class="selo-tr ${d>=3?"velho":""}">🚚 ${fmt(s.transito_cx,1)} cx a caminho</span>`;
+}
+function avisoTransito(it,s){
+  if(!temTransito(s)) return "";
+  const d = s.transito_dias, u = unidade(it);
+  const velho = d>=3;
+  return `<div class="transito ${velho?"velho":""}">
+    <b>🚚 JÁ FATURADO — NÃO PEÇA DE NOVO.</b>
+    O fornecedor emitiu <b>${fmt(s.transito_cx,1)} cx</b> (${fmt(s.transito_qtd,1)} ${u})
+    que ainda não deram entrada nesta loja.<br>
+    <span class="nf">NF ${esc(s.transito_nf||"")}</span>
+    ${velho
+      ? `<b class="alerta-velho">Emitida há ${d} dias.</b> Para resfriado isso é muito tempo:
+         confirme com o fornecedor se está mesmo a caminho, se já chegou sem ser lançada,
+         ou se a nota foi cancelada — só então peça de novo.`
+      : `Considerando o que vem, o pedido de hoje seria
+         <b>${fmt(s.sug_liquida)} cx</b> em vez de ${fmt(s.sug_sistema)} cx.`}
+  </div>`;
+}
 // texto do equivalente: "3 cx = 60 kg"
 function equiv(it,cx){
   if(cx===""||cx===null||cx===undefined) return "";
@@ -237,8 +275,9 @@ function grupoItens(loja,editavel){
       const v=cache.vendas[loja+"|"+it.id_produto]||{};
       const u=unidade(it), up=unidadePedido(it);
       const conv = `<small>${fmt(porCaixa(it),1)} ${u}/cx</small>`;
-      h+=`<div class="item" id="it${it.id_produto}">
-        <div class="nome">${esc(it.descricao)}<span class="forn ${it.fornecedor}">${it.fornecedor==="natto"?"NATTO":"MAURICEA"}</span></div>
+      h+=`<div class="item ${temTransito(s)?"tem-transito":""}" id="it${it.id_produto}">
+        <div class="nome">${esc(it.descricao)}<span class="forn ${it.fornecedor}">${it.fornecedor==="natto"?"NATTO":"MAURICEA"}</span>${selo(s)}</div>
+        ${avisoTransito(it,s)}
         <div class="grid">
           <div class="g"><div class="v">${fmt(v.d2)}</div><div class="l">venda −2d</div></div>
           <div class="g"><div class="v">${fmt(v.d1)}</div><div class="l">venda ontem</div></div>
@@ -334,13 +373,13 @@ function vComprador(){
   const tot=cache.sug.filter(s=>s.loja===lojaSel).length;
   h+=`<div class="card muted">Operador de ${lojaSel}: <b>${tot-pend}/${tot}</b> itens com sugestão registrada.
       Prazo do fornecedor: <b>09h00</b>.</div>`;
-  h+=`<div class="tblwrap"><table><tr><th>Item</th><th>Est.</th><th>Prev 2d</th><th>Sist.</th><th>Oper.</th><th>Pedido</th></tr>`;
+  h+=`<div class="tblwrap"><table><tr><th>Item</th><th>Est.</th><th>Prev 2d</th><th>🚚</th><th>Sist.</th><th>Oper.</th><th>Pedido</th></tr>`;
   const ordenados=[...cache.itens].sort((a,b)=>(a.grupo||"").localeCompare(b.grupo||"")||(a.ordem-b.ordem));
   let gAnt=null;
   for(const it of ordenados){
     const s=sugDe(lojaSel,it.id_produto)||{};
     if(it.grupo!==gAnt){gAnt=it.grupo;
-      h+=`<tr><td colspan="6" style="background:var(--bg);font-weight:700;font-size:11px;text-transform:uppercase;color:var(--mut)">${esc(it.grupo||"outros")}</td></tr>`;}
+      h+=`<tr><td colspan="7" style="background:var(--bg);font-weight:700;font-size:11px;text-transform:uppercase;color:var(--mut)">${esc(it.grupo||"outros")}</td></tr>`;}
     const up=unidadePedido(it);
     h+=`<tr>
       <td><span class="forn ${it.fornecedor}" style="margin-left:0">${it.fornecedor==="natto"?"N":"M"}</span>
@@ -348,7 +387,8 @@ function vComprador(){
           ${s.justificativa_operador?`<div class="just">💬 ${esc(s.justificativa_operador)}</div>`:""}</td>
       <td>${fmt(s.estoque_virtual)}</td>
       <td>${fmt((s.prev_d1||0)+(s.prev_d2||0))}</td>
-      <td><b>${fmt(s.sug_sistema)}</b></td>
+      <td>${temTransito(s)?`<span class="selo-tr ${s.transito_dias>=3?"velho":""}" title="NF ${esc(s.transito_nf||"")}">${fmt(s.transito_cx,1)}</span>`:"—"}</td>
+      <td><b>${fmt(s.sug_sistema)}</b>${temTransito(s)?`<div class="muted" style="font-size:10px">c/ trânsito: <b>${fmt(s.sug_liquida)}</b></div>`:""}</td>
       <td>${s.sug_operador===null||s.sug_operador===undefined?"—":`<b class="${difere(s)?"neg":"pos"}">${fmt(s.sug_operador)}</b>`}</td>
       <td><input type="number" min="0" step="1" style="width:58px;padding:6px" id="pd${it.id_produto}"
           value="${s.pedido_final??""}" placeholder="${fmt(s.sug_operador??s.sug_sistema)}"
