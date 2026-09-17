@@ -434,8 +434,9 @@ async function exportarTXT(){
         const s=sugDe(loja,it.id_produto);
         const q=s?(s.pedido_final??null):null;
         if(!q) continue;                              // só o que o comprador fechou
-        const emb=fmt(porCaixa(it),3).replace(".","").replace(",",".");
-        const custo=it.ultimo_custo?Number(it.ultimo_custo).toFixed(4):"0";
+        // decimal com VÍRGULA e sempre 2 casas (padrão do VR)
+        const emb=Number(porCaixa(it)).toFixed(2).replace(".",",");
+        const custo=Number(it.ultimo_custo||0).toFixed(2).replace(".",",");
         linhas.push(`${it.id_produto}|${Number(q)}|${emb}|${custo}`);
         itens++;
       }
