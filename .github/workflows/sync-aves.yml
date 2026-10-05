@@ -2,8 +2,14 @@ name: Sync Aves (VR -> App)
 
 on:
   schedule:
-    - cron: "0 9 * * *"    # 06h00 Recife (09h00 UTC), todos os dias
+    - cron: "23 8 * * *"   # 05h23 Recife (minuto quebrado: fila menos concorrida)
+    - cron: "47 9 * * *"   # 06h47 Recife (reforço; o sync é idempotente)
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sync-aves.yml"
+      - "scripts/sync_aves.py"
 
 concurrency:
   group: aves
