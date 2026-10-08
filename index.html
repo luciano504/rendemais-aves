@@ -106,6 +106,9 @@ th{color:var(--mut); font-size:11px; text-transform:uppercase}
 .alerta-vermelho{background:var(--bad); color:#fff; border-radius:8px; padding:8px 10px; margin-bottom:8px; font-weight:700}
 .lanc{font-size:12px; margin-top:6px}
 .lanc button{padding:5px 10px; font-size:12px; border-radius:8px; margin-left:6px}
+.exp-lista{margin:8px 0; padding:0; list-style:none}
+.exp-lista li{display:flex; justify-content:space-between; align-items:center; gap:8px; border-bottom:1px solid var(--bd); padding:6px 0; font-size:13px}
+.exp-lista a{font-weight:700; color:var(--navy2); white-space:nowrap}
 .bt-sync{background:#0b8043; color:#fff; border-radius:20px; padding:8px 16px; font-size:14px; white-space:nowrap}
 .sync-status{border-left:4px solid #0b8043; background:var(--card); border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:13px}
 .sync-status.erro{border-left-color:var(--bad)}
@@ -135,6 +138,8 @@ const LOJA_INFO = {   // nome + bairro + cor fixa de cada loja (para ninguém la
   L09:{nome:"Massangana", bairro:"Piedade",          cor:"#00838F"}};
 const LOJAS = Object.fromEntries(Object.entries(LOJA_INFO).map(([k,v])=>[k,`${k} ${v.nome}`]));
 const GH_REPO = "luciano504/rendemais-aves", GH_WF = "sync-aves.yml";
+/* senha do comprador para EXPORTAR o TXT: só o "verificador" (PBKDF2) fica no código, nunca a senha */
+const SENHA_VERIF = {salt:"x3ZUgS2NmmFWt/R6cmAjYw==", hash:"ykppFF9FwN1O6ViM1OpEpnBT79etndhmmcC1D7px0AM="};
 const FATOR_FORA = 3;   // trava 4: pede conferência se o pedido passar de 3x o normal da loja
 const PAPEIS_COMPRADOR = ["gestor","comprador","prevencao"];
 const DOW_NOMES = ["dom","seg","ter","qua","qui","sex","sáb"];
@@ -315,6 +320,9 @@ async function carregar(){
   if(PAPEIS_COMPRADOR.includes(sess.papel)){
     const us=await sb.from("usuarios").select("id,nome,loja");
     cache.users=us.error?{}:Object.fromEntries(us.data.map(u=>[u.id,u]));
+    const ex=await sb.from("aves_config").select("chave,valor").gte("chave","export_"+hoje).lt("chave","export_"+hoje+"~");
+    cache.exports=ex.error?[]:ex.data.map(r=>{try{return JSON.parse(r.valor);}catch(e){return null;}}).filter(Boolean)
+      .sort((a,b)=>a.em<b.em?1:-1);
   }
   cache.vendas = {};   // (loja|pid) -> {d1,d2}
   for(const r of di.data){
@@ -611,6 +619,8 @@ function vComprador(){
   <div style="display:flex;justify-content:flex-end;margin:-6px 0 10px"><button class="bt-sync" onclick="sincronizarAgora()">🔄 Sincronizar agora</button></div>`;
   if(syncMsg&&syncMsg.txt) h+=`<div id="syncSt" class="sync-status ${syncMsg.erro?"erro":""}">${syncMsg.txt}</div>`;
   else h+=`<div id="syncSt" class="hide"></div>`;
+  if(cache.exports&&cache.exports.length){const e=cache.exports[0];
+    h+=`<div class="sync-status">📤 Último pedido exportado hoje às <b>${hhmm(e.em)}</b> por ${esc(e.por)}: ${e.arquivos.length} arquivo(s), ${e.itens} itens, ${e.caixas} cx${e.zerado?" — <b>pedidos zerados depois da exportação</b>":""}.</div>`;}
   h+=`<div class="chips">${Object.keys(LOJA_INFO).map(l=>{const i=LOJA_INFO[l], on=l===lojaSel;
     return `<button class="chip-loja ${on?'on':''}" style="border-color:${i.cor};${on?`background:${i.cor}`:""}"
       onclick="trocaLoja('${l}')"><b>${l} ${esc(i.nome)}</b><small>${esc(i.bairro)}</small></button>`;}).join("")}</div>`;
@@ -709,13 +719,28 @@ async function salvarComprador(){
    CODIGO INTERNO | QUANTIDADE | EMBALAGEM | PRECO
    Um arquivo por LOJA x FORNECEDOR — a loja e o fornecedor são escolhidos
    na tela do VR ao importar, por isso não vão dentro do arquivo. */
+let senhaOkAte=0;
+async function confereSenha(senha){
+  const base=await crypto.subtle.importKey("raw",new TextEncoder().encode(senha),"PBKDF2",false,["deriveBits"]);
+  const bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt:unb64(SENHA_VERIF.salt),iterations:310000,hash:"SHA-256"},base,256);
+  return b64(bits)===SENHA_VERIF.hash;
+}
+async function pedeSenhaExport(){
+  if(Date.now()<senhaOkAte) return true;            // lembra por 15 min
+  const senha=await pedirTexto({titulo:"Exportar o pedido para o VR", grande:"Senha do comprador",
+    corpo:`<p>Gera os arquivos TXT de todas as lojas para importar no VR.</p>`, placeholder:"senha", ok:"Exportar"});
+  if(!senha) return false;
+  if(!await confereSenha(senha)){ alert("❌ Senha incorreta."); return false; }
+  senhaOkAte=Date.now()+15*60*1000; return true;
+}
 async function exportarTXT(){
+  if(!await pedeSenhaExport()) return;
   await carregar();                       // pega o que está salvo de todas as lojas
-  const hoje=cache.hoje;
-  let ger=0, itens=0;
+  const hoje=cache.hoje, arquivos=[], linhasExp=[];
+  let itens=0, caixas=0;
   for(const forn of ["natto","mauricea"]){
     for(const loja of Object.keys(LOJAS)){
-      const linhas=[];
+      const linhas=[], pids=[];
       for(const it of cache.itens.filter(i=>i.fornecedor===forn)){
         const s=sugDe(loja,it.id_produto);
         const q=s?(s.pedido_final??null):null;
@@ -724,19 +749,40 @@ async function exportarTXT(){
         const emb=Number(porCaixa(it)).toFixed(2).replace(".",",");
         const custo=Number(it.ultimo_custo||0).toFixed(2).replace(".",",");
         linhas.push(`${it.id_produto}|${Number(q)}|${emb}|${custo}`);
-        itens++;
+        pids.push(it.id_produto); itens++; caixas+=Number(q);
       }
       if(!linhas.length) continue;
-      const blob=new Blob([linhas.join("\r\n")+"\r\n"],{type:"text/plain;charset=utf-8"});
-      const aEl=document.createElement("a");
-      aEl.href=URL.createObjectURL(blob);
-      aEl.download=`pedido_${loja}_${forn}_${hoje}.txt`;
-      aEl.click();
-      ger++;
+      const nome=`pedido_${loja}_${forn}_${hoje}.txt`;
+      const url=URL.createObjectURL(new Blob([linhas.join("\r\n")+"\r\n"],{type:"text/plain;charset=utf-8"}));
+      arquivos.push({nome,url,loja,forn,n:linhas.length,cx:linhas.reduce((t,l)=>t+Number(l.split("|")[1]),0),pids,linhas});
     }
   }
-  if(!ger) return alert("Nenhum pedido salvo para exportar. Digite as caixas e clique em Salvar antes.");
-  alert(`✅ ${ger} arquivo(s) gerado(s), ${itens} itens.\n\nUm arquivo por LOJA x FORNECEDOR, no LAYOUT PEDIDO do VR (código|qtd|embalagem|preço).\nNo VR: Pedido de Compra → Incluir (escolher fornecedor e loja) → Gerar → Importar → Arquivo.`);
+  if(!arquivos.length) return alert("Nenhum pedido salvo para exportar. Digite as caixas e clique em Salvar antes.");
+  for(const f of arquivos){ const aEl=document.createElement("a"); aEl.href=f.url; aEl.download=f.nome; document.body.appendChild(aEl); aEl.click(); aEl.remove();
+    await new Promise(z=>setTimeout(z,350)); }       // espaçado: o Chrome não segura os downloads seguidos
+  // registro da exportação (fica guardado mesmo depois de zerar)
+  const reg={em:new Date().toISOString(),por:sess.nome,itens,caixas,zerado:false,
+    arquivos:arquivos.map(f=>({nome:f.nome,loja:f.loja,forn:f.forn,itens:f.n,cx:f.cx,linhas:f.linhas}))};
+  const chave="export_"+hoje+"_"+reg.em.slice(11,19).replace(/:/g,"");
+  await sb.from("aves_config").upsert([{chave,valor:JSON.stringify(reg),atualizado_em:reg.em}],{onConflict:"chave"});
+  const lista=`<ul class="exp-lista">${arquivos.map(f=>`<li><span><b>${esc(nomeLoja(f.loja))}</b> · ${f.forn==="natto"?"Natto":"Mauricea"}<br>
+      <span class="muted">${f.n} itens · ${f.cx} cx</span></span><a href="${f.url}" download="${f.nome}">⬇️ baixar de novo</a></li>`).join("")}</ul>`;
+  const zerar=await confirmar({loja:"", titulo:"✅ Pedido exportado com sucesso", grande:`${arquivos.length} arquivo(s) · ${caixas} cx`,
+    corpo:`<p style="margin:0 0 4px">${itens} itens no LAYOUT PEDIDO do VR, um arquivo por loja × fornecedor. Confira se todos estão na pasta <b>Downloads</b>
+      — se faltar algum, clique em "baixar de novo".</p>${lista}
+      <p class="muted" style="margin-top:8px">No VR: Pedido de Compra → Incluir (fornecedor e loja) → Gerar → Importar → Arquivo.</p>
+      <p style="margin-top:10px"><b>Zerar os pedidos agora?</b> A coluna "Pedido" volta a ficar vazia em todas as lojas, para ninguém exportar o mesmo pedido duas vezes. Os arquivos e este registro continuam guardados.</p>`,
+    ok:"🧹 Zerar pedidos exportados", nao:"Manter como está"});
+  if(!zerar){ await carregar(); render(); return; }
+  for(const f of arquivos){
+    const {error}=await sb.from("aves_sugestoes").update({pedido_final:null,comprador_login:null,comprador_em:null})
+      .eq("data",hoje).eq("loja",f.loja).in("id_produto",f.pids);
+    if(error) return alert("Erro ao zerar "+f.loja+": "+error.message);
+  }
+  reg.zerado=true;
+  await sb.from("aves_config").upsert([{chave,valor:JSON.stringify(reg),atualizado_em:new Date().toISOString()}],{onConflict:"chave"});
+  alert(`🧹 Pedidos zerados (${itens} itens). A exportação das ${hhmm(reg.em)} ficou registrada no topo da tela.`);
+  await carregar(); render();
 }
 
 /* ================= FLUXO ================= */
