@@ -83,6 +83,32 @@ th{color:var(--mut); font-size:11px; text-transform:uppercase}
 .center{text-align:center}
 .hide{display:none}
 .tblwrap{overflow-x:auto}
+/* ---- identidade da loja (evita lançar na loja errada) ---- */
+.faixa-loja{color:#fff; border-radius:14px; padding:12px 14px; margin-bottom:12px; display:flex; align-items:center; gap:12px;
+  box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.faixa-loja .cod{background:rgba(255,255,255,.22); border-radius:10px; padding:6px 10px; font-weight:800; font-size:20px}
+.faixa-loja .nm{font-weight:800; font-size:20px; line-height:1.1; text-transform:uppercase}
+.faixa-loja .br{font-size:13px; opacity:.92}
+.chip-loja{border:2px solid var(--bd); background:var(--card); border-radius:12px; padding:6px 10px; cursor:pointer;
+  color:var(--tx); text-align:left; line-height:1.15; min-width:104px}
+.chip-loja b{font-size:13px; display:block}
+.chip-loja small{font-size:11px; color:var(--mut)}
+.chip-loja.on{color:#fff} .chip-loja.on small{color:#fff; opacity:.9}
+.modal-fundo{position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px}
+.modal{background:var(--card); color:var(--tx); border-radius:16px; max-width:440px; width:100%; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.modal .topo{color:#fff; padding:16px; text-align:center}
+.modal .topo .grande{font-size:24px; font-weight:800; text-transform:uppercase; line-height:1.1}
+.modal .corpo{padding:14px 16px; font-size:14px; max-height:50vh; overflow:auto}
+.modal .acoes{display:flex; gap:10px; padding:0 16px 16px}
+.modal .acoes button{flex:1}
+.fora{background:#fdeceb; border-left:4px solid var(--bad); border-radius:8px; padding:8px 10px; margin:8px 0; color:#4a1512; font-size:13px}
+.fora li{margin:2px 0}
+.alerta-vermelho{background:var(--bad); color:#fff; border-radius:8px; padding:8px 10px; margin-bottom:8px; font-weight:700}
+.lanc{font-size:12px; margin-top:6px}
+.lanc button{padding:5px 10px; font-size:12px; border-radius:8px; margin-left:6px}
+.bt-sync{background:#0b8043; color:#fff; border-radius:20px; padding:8px 16px; font-size:14px; white-space:nowrap}
+.sync-status{border-left:4px solid #0b8043; background:var(--card); border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:13px}
+.sync-status.erro{border-left-color:var(--bad)}
 </style>
 </head>
 <body>
@@ -100,11 +126,20 @@ const SUPABASE_URL = "https://estciwkeihmokvlnvaum.supabase.co";
 const SUPABASE_KEY = "sb_publishable_l14fjxQmWUeu5OXlZJ35GA_-X3ESkgZ";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const LOJAS = {L01:"L01 Veneza",L02:"L02 Máximo",L03:"L03 Royal",L05:"L05 Alvorada",L08:"L08 Tradição",L09:"L09 Massangana"};
+const LOJA_INFO = {   // nome + bairro + cor fixa de cada loja (para ninguém lançar na loja errada)
+  L01:{nome:"Veneza",     bairro:"Jardim São Paulo", cor:"#1565C0"},
+  L02:{nome:"Máximo",     bairro:"Vasco da Gama",    cor:"#2E7D32"},
+  L03:{nome:"Royal",      bairro:"Brasília Teimosa", cor:"#6A1B9A"},
+  L05:{nome:"Alvorada",   bairro:"Iputinga",         cor:"#C62828"},
+  L08:{nome:"Tradição",   bairro:"Paulista",         cor:"#E65100"},
+  L09:{nome:"Massangana", bairro:"Piedade",          cor:"#00838F"}};
+const LOJAS = Object.fromEntries(Object.entries(LOJA_INFO).map(([k,v])=>[k,`${k} ${v.nome}`]));
+const GH_REPO = "luciano504/rendemais-aves", GH_WF = "sync-aves.yml";
+const FATOR_FORA = 3;   // trava 4: pede conferência se o pedido passar de 3x o normal da loja
 const PAPEIS_COMPRADOR = ["gestor","comprador","prevencao"];
 const DOW_NOMES = ["dom","seg","ter","qua","qui","sex","sáb"];
 
-let sess=null, tela="pedido", lojaSel=null, cache={};
+let sess=null, tela="pedido", lojaSel=null, lojaTrocadaEm=0, cache={}, syncMsg=null;
 
 /* ================= UTIL ================= */
 const $ = s=>document.querySelector(s);
@@ -153,12 +188,53 @@ function equiv(it,cx){
   return `= ${fmt(n*porCaixa(it),1)} ${unidade(it)}`;
 }
 function dataBR(iso){const [a,m,d]=iso.split("-");return `${d}/${m}`;}
+function corLoja(l){return (LOJA_INFO[l]||{}).cor||"#1F3864";}
+function nomeLoja(l){const i=LOJA_INFO[l]; return i?`${l} ${i.nome}`:l;}
+function nomeLojaLongo(l){const i=LOJA_INFO[l]; return i?`${l} · ${i.nome} · ${i.bairro}`:l;}
+function faixaLoja(l,txt){const i=LOJA_INFO[l]||{nome:l,bairro:""};
+  return `<div class="faixa-loja" style="background:${corLoja(l)}">
+    <span class="cod">${l}</span>
+    <div><div class="br">${txt||"Você está lançando para a loja"}</div>
+      <div class="nm">${esc(i.nome)}</div><div class="br">📍 ${esc(i.bairro)}</div></div></div>`;}
+/* janela de confirmação grande, na cor da loja. Retorna Promise<boolean> */
+function confirmar({loja,titulo,grande,corpo,ok="Confirmar",nao="Voltar",exigeCheck=null}){
+  return new Promise(res=>{
+    const d=document.createElement("div"); d.className="modal-fundo";
+    d.innerHTML=`<div class="modal">
+      <div class="topo" style="background:${corLoja(loja)}"><div>${titulo||""}</div>
+        <div class="grande">${grande||""}</div></div>
+      <div class="corpo">${corpo||""}
+        ${exigeCheck?`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-weight:700">
+          <input type="checkbox" id="mdChk" style="width:22px;height:22px;flex:none"> ${exigeCheck}</label>`:""}</div>
+      <div class="acoes"><button class="bt-g" id="mdNao">${nao}</button>
+        <button id="mdOk" style="background:${corLoja(loja)};color:#fff">${ok}</button></div></div>`;
+    document.body.appendChild(d);
+    const okB=d.querySelector("#mdOk"), chk=d.querySelector("#mdChk");
+    if(chk){okB.disabled=true; okB.style.opacity=.4; chk.onchange=()=>{okB.disabled=!chk.checked; okB.style.opacity=chk.checked?1:.4;};}
+    d.querySelector("#mdNao").onclick=()=>{d.remove();res(false);};
+    okB.onclick=()=>{if(okB.disabled)return; d.remove();res(true);};
+  });
+}
+/* trava 4: quantidade muito acima do normal DAQUELA loja */
+function refNormal(loja,it){
+  const s=sugDe(loja,it.id_produto)||{};
+  const prevCx=((Number(s.prev_d1)||0)+(Number(s.prev_d2)||0))/porCaixa(it);
+  return Math.max(Number(s.sug_sistema)||0, Math.ceil(prevCx), 1);
+}
+function foraDoNormal(loja,it,val){const r=refNormal(loja,it); return val>=3 && val>FATOR_FORA*r ? r : 0;}
+function listaFora(fora){
+  if(!fora.length) return "";
+  return `<div class="fora"><b>⚠️ ${fora.length} item(ns) muito acima do normal desta loja:</b><ul style="margin:6px 0 0 18px;padding:0">
+    ${fora.map(f=>`<li><b>${esc(f.nome)}</b>: ${f.val} cx (o normal aqui é até ~${f.ref} cx)</li>`).join("")}</ul>
+    Será que este número não é de outra loja?</div>`;
+}
+function hhmm(iso){return iso?new Date(iso).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit",timeZone:"America/Recife"}):"";}
 function esc(t){return String(t??"").replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));}
 
 /* ================= LOGIN ================= */
 async function telaLogin(){
   $("#hUser").textContent=""; $("#hSub").textContent="";
-  const {data,error} = await sb.from("usuarios").select("id,nome,papel")
+  const {data,error} = await sb.from("usuarios").select("id,nome,papel,loja")
      .eq("ativo",true).neq("papel","fornecedor").order("nome");
   if(error){ $("#app").innerHTML=`<div class="alert">Erro ao conectar: ${esc(error.message)}</div>`; return;}
   $("#app").innerHTML = `
@@ -166,20 +242,41 @@ async function telaLogin(){
     <div style="font-size:46px">🐔</div>
     <h2 style="text-transform:none;font-size:18px;color:var(--tx)">Pedido de Aves Resfriadas</h2>
     <p class="muted">Sugestão diária de pedido — Natto e Mauricea</p>
-    <select id="lgUser">${data.map(u=>`<option value="${u.id}">${esc(u.nome)}</option>`).join("")}</select>
+    <select id="lgUser"><option value="">— escolha o seu nome —</option>
+      ${Object.keys(LOJA_INFO).map(l=>{const us=data.filter(u=>u.loja===l&&!PAPEIS_COMPRADOR.includes(u.papel));
+        return us.length?`<optgroup label="${esc(nomeLojaLongo(l))}">${us.map(u=>`<option value="${u.id}">${esc(u.nome)} — ${esc(nomeLoja(l))}</option>`).join("")}</optgroup>`:"";}).join("")}
+      ${(()=>{const us=data.filter(u=>PAPEIS_COMPRADOR.includes(u.papel)||!LOJA_INFO[u.loja]);
+        return us.length?`<optgroup label="Comprador / Gestor">${us.map(u=>`<option value="${u.id}">${esc(u.nome)}</option>`).join("")}</optgroup>`:"";})()}
+    </select>
     <input type="password" id="lgPin" placeholder="PIN" inputmode="numeric" style="margin-top:8px">
     <button class="bt-p" style="width:100%;margin-top:12px" onclick="doLogin()">Entrar</button>
   </div>`;
 }
 async function doLogin(){
   const id=$("#lgUser").value, pin=$("#lgPin").value;
+  if(!id) return alert("Escolha o seu nome na lista.");
   const {data,error} = await sb.from("usuarios").select("*").eq("id",id).single();
   if(error) return alert("Erro: "+error.message);
   if(data.pin_hash !== await sha256(pin)) return alert("PIN incorreto.");
   sess=data; localStorage.setItem("aves_sess",JSON.stringify({id:data.id}));
   iniciar();
 }
-function sair(){localStorage.removeItem("aves_sess"); sess=null; telaLogin();}
+function sair(){localStorage.removeItem("aves_sess"); sess=null; lojaSel=null; telaLogin();}
+/* operador confirma a loja no 1º acesso de cada dia */
+async function confirmaLojaDoDia(){
+  if(PAPEIS_COMPRADOR.includes(sess.papel)) return true;
+  const chave="aves_loja_ok_"+sess.id, hoje=hojeRecife();
+  try{ if(localStorage.getItem(chave)===hoje) return true; }catch(e){}
+  const i=LOJA_INFO[sess.loja]||{nome:sess.loja,bairro:""};
+  const ok=await confirmar({loja:sess.loja, titulo:`Olá, ${esc(sess.nome.split(" ")[0])}! Você está na loja`,
+    grande:`${sess.loja} · ${esc(i.nome)}`,
+    corpo:`<p style="font-size:16px;text-align:center;margin:4px 0">📍 <b>${esc(i.bairro)}</b></p>
+      <p class="muted" style="text-align:center">Tudo o que você lançar vai para esta loja.</p>`,
+    ok:`Sim, sou da ${esc(i.nome)}`, nao:"Não, sou de outra loja"});
+  if(!ok){ alert("Você entrou com o usuário de outra loja.\nSaia e entre com o SEU nome. Se o seu nome não estiver na lista, fale com o comprador."); sair(); return false; }
+  try{ localStorage.setItem(chave,hoje); }catch(e){}
+  return true;
+}
 
 /* ================= DADOS ================= */
 async function carregar(){
@@ -193,7 +290,32 @@ async function carregar(){
   ]);
   for(const r of [it,sg,di]) if(r.error) throw r.error;
   cache.itens = it.data; cache.porId = Object.fromEntries(it.data.map(i=>[i.id_produto,i]));
-  cache.sug = sg.data; cache.hoje = hoje;
+  cache.sug = sg.data; cache.hoje = hoje; cache.dataBase = null;
+  // Sync de hoje não rodou? Usa o estoque/sugestão da ÚLTIMA atualização (pedido 17/09)
+  if(!sg.data.some(s=>s.sug_sistema!==null&&s.sug_sistema!==undefined)){
+    const ul = await sb.from("aves_sugestoes").select("data").not("sug_sistema","is",null)
+      .lt("data",hoje).order("data",{ascending:false}).limit(1);
+    if(!ul.error && ul.data.length){
+      const dBase = ul.data[0].data;
+      const bs = await sb.from("aves_sugestoes").select("*").eq("data",dBase);
+      if(!bs.error && bs.data.length){
+        cache.dataBase = dBase;
+        const hj = Object.fromEntries(sg.data.map(s=>[s.loja+"|"+s.id_produto,s]));
+        const limpo = {sug_operador:null,justificativa_operador:null,operador_login:null,operador_em:null,
+                       pedido_final:null,comprador_login:null,comprador_em:null};
+        const junt = bs.data.map(b=>{
+          const t = hj[b.loja+"|"+b.id_produto]||{}; delete hj[b.loja+"|"+b.id_produto];
+          const o = {...b, ...limpo, data:hoje};
+          for(const c of Object.keys(limpo)) if(t[c]!==null&&t[c]!==undefined) o[c]=t[c];
+          return o;});
+        cache.sug = junt.concat(Object.values(hj));
+      }
+    }
+  }
+  if(PAPEIS_COMPRADOR.includes(sess.papel)){
+    const us=await sb.from("usuarios").select("id,nome,loja");
+    cache.users=us.error?{}:Object.fromEntries(us.data.map(u=>[u.id,u]));
+  }
   cache.vendas = {};   // (loja|pid) -> {d1,d2}
   for(const r of di.data){
     const k=r.loja+"|"+r.id_produto;
@@ -202,6 +324,9 @@ async function carregar(){
     if(r.data===dISO(d2)) cache.vendas[k].d2=r.venda;
   }
 }
+function avisoBase(){
+  const [a,m,d]=cache.dataBase.split("-");
+  return `<div class="alert" style="border-color:var(--amber)">⚠️ O sync de hoje ainda não rodou. Estoque, previsão e sugestão abaixo são da última atualização (<b>${d}/${m}</b>) — confira antes de pedir; a venda de ontem ainda não foi descontada.</div>`;}
 function sugDe(loja,pid){return cache.sug.find(s=>s.loja===loja&&s.id_produto===pid);}
 
 /* ---- histórico de 4 semanas ---- */
@@ -246,21 +371,23 @@ function vHistorico(loja){
 /* ================= OPERADOR ================= */
 function vOperador(){
   const loja = sess.loja;
-  $("#hSub").textContent = LOJAS[loja]||loja;
-  const semSync = !cache.sug.some(s=>s.loja===loja);
+  $("#hSub").textContent = nomeLojaLongo(loja);
+  const semSync = !cache.sug.some(s=>s.loja===loja&&s.sug_sistema!==null&&s.sug_sistema!==undefined);
   let h = `<div class="tabs">
     <button class="tab ${tela==='pedido'?'on':''}" onclick="tela='pedido';render()">📋 Pedido de hoje</button>
     <button class="tab ${tela==='balanco'?'on':''}" onclick="tela='balanco';render()">⚖️ Minibalanço</button>
     <button class="tab ${tela==='hist'?'on':''}" onclick="tela='hist';render()">📈 4 semanas</button>
   </div>`;
+  h+=faixaLoja(loja);
   if(tela==="hist") return h+vHistorico(loja);
   if(semSync) h+=`<div class="alert">A sugestão de hoje ainda não foi gerada (sync roda às 06h). Fale com o comprador se passar das 07h.</div>`;
+  else if(cache.dataBase) h+=avisoBase();
   if(tela==="balanco") return h+vBalanco(loja);
 
   h+=`<div class="alert" style="border-color:var(--amber)">Confira cada item e registre a <b>sua</b> sugestão até as <b>08h00</b>. Se discordar do estoque virtual ou da sugestão, explique o motivo — o comprador vai ler.</div>`;
   h+=grupoItens(loja,true);
   $("#fbar").classList.remove("hide");
-  $("#fbar").innerHTML=`<button class="bt-p" onclick="salvarOperador()">💾 Enviar minha sugestão</button>`;
+  $("#fbar").innerHTML=`<button onclick="salvarOperador()" style="background:${corLoja(loja)};color:#fff">💾 Enviar sugestão da ${esc(nomeLoja(loja))}</button>`;
   return h;
 }
 function grupoItens(loja,editavel){
@@ -320,15 +447,21 @@ async function salvarOperador(){
       justificativa_operador:ju||null,operador_login:sess.id,operador_em:new Date().toISOString()});
   }
   if(!ups.length) return alert("Nenhuma sugestão preenchida.");
+  const fora=[]; for(const u of ups){const it=cache.porId[u.id_produto]; const r=foraDoNormal(loja,it,u.sug_operador);
+    if(r) fora.push({nome:it.descricao,val:u.sug_operador,ref:r});}
+  const i=LOJA_INFO[loja]||{nome:loja,bairro:""};
+  if(!await confirmar({loja, titulo:`Enviar ${ups.length} itens para a loja`, grande:`${loja} · ${esc(i.nome)}`,
+     corpo:`<p style="text-align:center;margin:0 0 6px">📍 ${esc(i.bairro)}</p>${listaFora(fora)}`,
+     ok:"Confirmar e enviar", exigeCheck: fora.length?"Conferi os itens acima e os números são desta loja":null})) return;
   const {error}=await sb.from("aves_sugestoes").upsert(ups,{onConflict:"data,loja,id_produto"});
   if(error) return alert("Erro ao salvar: "+error.message);
-  alert(`✅ ${ups.length} itens enviados ao comprador.`);
+  alert(`✅ ${ups.length} itens da ${nomeLoja(loja)} enviados ao comprador.`);
   await carregar(); render();
 }
 /* ---- minibalanço ---- */
 function vBalanco(loja){
   $("#fbar").classList.remove("hide");
-  $("#fbar").innerHTML=`<button class="bt-s" onclick="salvarBalanco()">⚖️ Gravar contagem</button>`;
+  $("#fbar").innerHTML=`<button onclick="salvarBalanco()" style="background:${corLoja(loja)};color:#fff">⚖️ Gravar contagem da ${esc(nomeLoja(loja))}</button>`;
   let h=`<div class="alert">Conte o estoque físico e digite abaixo. A contagem vira o novo ponto zero do estoque virtual (a partir do próximo sync). Bandeja em <b>bandejas</b>, granel em <b>kg</b>, galeto em <b>unidades</b>.</div>`;
   for(const it of cache.itens){
     const s=sugDe(loja,it.id_produto)||{};
@@ -347,11 +480,123 @@ async function salvarBalanco(){
       estoque_anterior:s.estoque_virtual??null,usuario:sess.id});
   }
   if(!rows.length) return alert("Nenhuma contagem digitada.");
-  if(!confirm(`Gravar contagem de ${rows.length} itens da loja ${loja}? Isso rebaseia o estoque virtual.`)) return;
+  const i=LOJA_INFO[loja]||{nome:loja,bairro:""};
+  if(!await confirmar({loja, titulo:`Gravar contagem de ${rows.length} itens da loja`, grande:`${loja} · ${esc(i.nome)}`,
+     corpo:`<p style="text-align:center;margin:0 0 6px">📍 ${esc(i.bairro)}</p>
+       <p class="muted">A contagem vira o novo ponto zero do estoque virtual desta loja.</p>${alertaTroca(loja)}`,
+     ok:"Gravar contagem"})) return;
   const {error}=await sb.from("aves_minibalanco").upsert(rows,{onConflict:"data,loja,id_produto"});
   if(error) return alert("Erro: "+error.message);
   alert("✅ Minibalanço gravado. O estoque virtual será ajustado no próximo sync (06h).");
   tela="pedido"; render();
+}
+
+/* ================= SINCRONIZAR AGORA (comprador) =================
+   O token do GitHub fica no Supabase CIFRADO com a senha (AES-GCM, chave PBKDF2).
+   A senha não está escrita em lugar nenhum do código: quem não sabe a senha
+   não consegue abrir o token. O token só tem permissão de disparar o sync deste app. */
+const b64=a=>btoa(String.fromCharCode(...new Uint8Array(a)));
+const unb64=t=>Uint8Array.from(atob(t),c=>c.charCodeAt(0));
+async function chaveDe(senha,salt){
+  const base=await crypto.subtle.importKey("raw",new TextEncoder().encode(senha),"PBKDF2",false,["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:310000,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+async function cifrar(texto,senha){
+  const salt=crypto.getRandomValues(new Uint8Array(16)), iv=crypto.getRandomValues(new Uint8Array(12));
+  const c=await crypto.subtle.encrypt({name:"AES-GCM",iv},await chaveDe(senha,salt),new TextEncoder().encode(texto));
+  return JSON.stringify({s:b64(salt),i:b64(iv),c:b64(c)});
+}
+async function decifrar(json,senha){
+  const o=JSON.parse(json);
+  const p=await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64(o.i)},await chaveDe(senha,unb64(o.s)),unb64(o.c));
+  return new TextDecoder().decode(p);
+}
+function pedirTexto({titulo,grande,corpo,placeholder,tipo="password",ok="Continuar"}){
+  return new Promise(res=>{
+    const d=document.createElement("div"); d.className="modal-fundo";
+    d.innerHTML=`<div class="modal"><div class="topo" style="background:#0b8043"><div>${titulo||""}</div><div class="grande">${grande||""}</div></div>
+      <div class="corpo">${corpo||""}<input type="${tipo}" id="mdTx" placeholder="${placeholder||""}" autocomplete="off" style="margin-top:8px"></div>
+      <div class="acoes"><button class="bt-g" id="mdNao">Cancelar</button><button id="mdOk" style="background:#0b8043;color:#fff">${ok}</button></div></div>`;
+    document.body.appendChild(d);
+    const tx=d.querySelector("#mdTx"); setTimeout(()=>tx.focus(),50);
+    const fim=v=>{d.remove();res(v);};
+    d.querySelector("#mdNao").onclick=()=>fim(null);
+    d.querySelector("#mdOk").onclick=()=>fim(tx.value.trim()||null);
+    tx.onkeydown=e=>{if(e.key==="Enter") fim(tx.value.trim()||null);};
+  });
+}
+async function lerCfg(){
+  const r=await sb.from("aves_config").select("valor").eq("chave","gh_token_cifrado").limit(1);
+  if(r.error) throw new Error("Tabela aves_config não encontrada no Supabase — rode o aves_config.sql uma vez.");
+  return r.data.length?r.data[0].valor:null;
+}
+async function gravarCfg(v){
+  const r=await sb.from("aves_config").upsert([{chave:"gh_token_cifrado",valor:v,atualizado_em:new Date().toISOString()}],{onConflict:"chave"});
+  if(r.error) throw r.error;
+}
+async function configurarToken(senha){
+  const tok=await pedirTexto({titulo:"Primeira vez: configurar", grande:"Chave do GitHub",
+    corpo:`<p>Cole o token do GitHub (começa com <b>github_pat_</b>, permissão <b>Actions: Read and write</b> no repositório rendemais-aves).</p>
+      <p class="muted">Ele será guardado cifrado com a senha que você acabou de digitar. Só é pedido uma vez.</p>`,
+    placeholder:"github_pat_...", ok:"Guardar"});
+  if(!tok) return null;
+  if(!/^(github_pat_|ghp_)/.test(tok)){ alert("Isso não parece um token do GitHub (deve começar com github_pat_)."); return null; }
+  await gravarCfg(await cifrar(tok,senha));
+  return tok;
+}
+function gh(tok,caminho,opt={}){
+  return fetch(`https://api.github.com/repos/${GH_REPO}${caminho}`,{...opt,
+    headers:{Authorization:"Bearer "+tok,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28",...(opt.headers||{})}});
+}
+function statusSync(txt,erro){ syncMsg={txt,erro}; const el=$("#syncSt");
+  if(el){ el.className="sync-status"+(erro?" erro":""); el.innerHTML=txt; } }
+async function sincronizarAgora(){
+  if(syncMsg&&syncMsg.rodando) return alert("Já existe uma sincronização em andamento.");
+  const senha=await pedirTexto({titulo:"Sincronizar com o VR agora", grande:"Senha do comprador",
+    corpo:`<p>Busca no VR o estoque, as vendas e as notas em trânsito e recalcula a sugestão de todas as lojas. Leva de 1 a 3 minutos.</p>`,
+    placeholder:"senha", ok:"Sincronizar"});
+  if(!senha) return;
+  let tok;
+  try{
+    const cfg=await lerCfg();
+    if(!cfg){ tok=await configurarToken(senha); if(!tok) return; }
+    else { try{ tok=await decifrar(cfg,senha); }catch(e){ return alert("❌ Senha incorreta."); } }
+  }catch(e){ return alert("Erro: "+e.message); }
+  const t0=Date.now();
+  syncMsg={rodando:true}; render();
+  statusSync("🔄 Disparando a sincronização no GitHub…");
+  let r;
+  try{ r=await gh(tok,`/actions/workflows/${GH_WF}/dispatches`,{method:"POST",body:JSON.stringify({ref:"main"})}); }
+  catch(e){ syncMsg=null; return statusSync("❌ Sem conexão com o GitHub: "+esc(e.message),true); }
+  if(r.status===401||r.status===403||r.status===404){
+    syncMsg=null; statusSync(`❌ O GitHub recusou a chave (erro ${r.status}). Ela pode ter vencido ou estar sem permissão.`,true);
+    if(confirm("A chave do GitHub foi recusada. Quer cadastrar uma chave nova agora?")){
+      try{ if(await configurarToken(senha)) alert("Chave nova guardada. Toque em Sincronizar de novo."); }catch(e){ alert("Erro: "+e.message); }
+    }
+    return;
+  }
+  if(r.status!==204){ syncMsg=null; return statusSync(`❌ Resposta inesperada do GitHub (${r.status}).`,true); }
+  syncMsg.rodando=true;
+  statusSync("⏳ Sincronização na fila do GitHub… (não precisa ficar na tela)");
+  let run=null;
+  for(let k=0;k<72;k++){                        // até 6 minutos
+    await new Promise(z=>setTimeout(z,5000));
+    try{
+      const lr=await (await gh(tok,`/actions/workflows/${GH_WF}/runs?event=workflow_dispatch&per_page=5`)).json();
+      run=(lr.workflow_runs||[]).find(x=>new Date(x.created_at).getTime()>=t0-60000)||run;
+    }catch(e){}
+    if(!run) continue;
+    const seg=Math.round((Date.now()-t0)/1000);
+    if(run.status!=="completed"){ statusSync(`⏳ Sincronizando (run #${run.run_number}, ${run.status==="queued"?"na fila":"rodando"})… ${seg}s`); syncMsg.rodando=true; continue; }
+    syncMsg=null;
+    if(run.conclusion==="success"){
+      statusSync(`✅ Sincronizado às ${hhmm(new Date().toISOString())} (run #${run.run_number}). Dados recarregados.`);
+      await carregar(); render(); statusSync(syncMsg?.txt||`✅ Sincronizado às ${hhmm(new Date().toISOString())} (run #${run.run_number}). Dados recarregados.`);
+    } else statusSync(`❌ A sincronização terminou com erro (run #${run.run_number}: ${esc(run.conclusion)}). Veja em GitHub → Actions.`,true);
+    return;
+  }
+  syncMsg=null;
+  statusSync("⚠️ O GitHub ainda não terminou depois de 6 minutos. Recarregue a página daqui a pouco.",true);
 }
 
 /* ================= COMPRADOR ================= */
@@ -362,17 +607,23 @@ function vComprador(){
     <button class="tab ${tela!=='balanco'?'on':''}" onclick="tela='pedido';render()">📋 Pedido de hoje</button>
     <button class="tab ${tela==='balanco'?'on':''}" onclick="tela='balanco';render()">⚖️ Minibalanço</button>
     <button class="tab ${tela==='hist'?'on':''}" onclick="tela='hist';render()">📈 4 semanas</button>
-  </div>`;
-  h+=`<div class="chips">${Object.keys(LOJAS).map(l=>
-    `<span class="chip ${l===lojaSel?'on':''}" onclick="lojaSel='${l}';render()">${l}</span>`).join("")}</div>`;
+  </div>
+  <div style="display:flex;justify-content:flex-end;margin:-6px 0 10px"><button class="bt-sync" onclick="sincronizarAgora()">🔄 Sincronizar agora</button></div>`;
+  if(syncMsg&&syncMsg.txt) h+=`<div id="syncSt" class="sync-status ${syncMsg.erro?"erro":""}">${syncMsg.txt}</div>`;
+  else h+=`<div id="syncSt" class="hide"></div>`;
+  h+=`<div class="chips">${Object.keys(LOJA_INFO).map(l=>{const i=LOJA_INFO[l], on=l===lojaSel;
+    return `<button class="chip-loja ${on?'on':''}" style="border-color:${i.cor};${on?`background:${i.cor}`:""}"
+      onclick="trocaLoja('${l}')"><b>${l} ${esc(i.nome)}</b><small>${esc(i.bairro)}</small></button>`;}).join("")}</div>`;
+  h+=faixaLoja(lojaSel,"Loja selecionada");
   if(tela==="hist") return h+vHistorico(lojaSel);
   if(tela==="balanco") return h+vBalanco(lojaSel);
-  const semSync=!cache.sug.some(s=>s.loja===lojaSel);
+  const semSync=!cache.sug.some(s=>s.loja===lojaSel&&s.sug_sistema!==null&&s.sug_sistema!==undefined);
   if(semSync) h+=`<div class="alert">Sem sugestão de hoje para ${lojaSel} — o sync das 06h ainda não rodou.</div>`;
+  else if(cache.dataBase) h+=avisoBase();
   const pend=cache.sug.filter(s=>s.loja===lojaSel&&s.sug_operador===null).length;
   const tot=cache.sug.filter(s=>s.loja===lojaSel).length;
-  h+=`<div class="card muted">Operador de ${lojaSel}: <b>${tot-pend}/${tot}</b> itens com sugestão registrada.
-      Prazo do fornecedor: <b>09h00</b>.</div>`;
+  h+=`<div class="card muted">Operador de ${esc(nomeLoja(lojaSel))}: <b>${tot-pend}/${tot}</b> itens com sugestão registrada.
+      Prazo do fornecedor: <b>09h00</b>.${blocoLancadores(lojaSel)}</div>`;
   h+=`<div class="tblwrap"><table><tr><th>Item</th><th>Est.</th><th>Prev 2d</th><th>🚚</th><th>Sist.</th><th>Oper.</th><th>Pedido</th></tr>`;
   const ordenados=[...cache.itens].sort((a,b)=>(a.grupo||"").localeCompare(b.grupo||"")||(a.ordem-b.ordem));
   let gAnt=null;
@@ -399,9 +650,38 @@ function vComprador(){
   h+=`</table></div>`;
   $("#fbar").classList.remove("hide");
   $("#fbar").innerHTML=`
-    <button class="bt-s" onclick="salvarComprador()">💾 Salvar ${lojaSel}</button>
+    <button onclick="salvarComprador()" style="background:${corLoja(lojaSel)};color:#fff">💾 Salvar ${esc(nomeLoja(lojaSel))}</button>
     <button class="bt-p" onclick="exportarTXT()">📄 Exportar TXT</button>`;
   return h;
+}
+function trocaLoja(l){ if(l!==lojaSel){lojaSel=l; lojaTrocadaEm=Date.now();} render(); }
+function alertaTroca(loja){
+  return (Date.now()-lojaTrocadaEm<15000)
+    ? `<div class="alerta-vermelho">⚠️ Você trocou para a ${esc(nomeLoja(loja))} há poucos segundos. Confira se é mesmo esta loja.</div>` : "";
+}
+/* trava 4: quem lançou nesta loja hoje + desfazer por usuário */
+function blocoLancadores(loja){
+  const por={};
+  for(const s of cache.sug.filter(x=>x.loja===loja&&x.operador_login)){
+    const k=s.operador_login; por[k]=por[k]||{n:0,ult:null};
+    por[k].n++; if(!por[k].ult||s.operador_em>por[k].ult) por[k].ult=s.operador_em;
+  }
+  const ks=Object.keys(por); if(!ks.length) return "";
+  return ks.map(k=>{const u=(cache.users||{})[k]||{nome:"usuário "+k};
+    const outra = u.loja && u.loja!==loja && LOJA_INFO[u.loja];
+    return `<div class="lanc ${outra?"neg":""}">${outra?"⚠️ ":"👤 "}<b>${esc(u.nome)}</b>${u.loja?` (${esc(nomeLoja(u.loja))})`:""}
+      lançou ${por[k].n} itens às ${hhmm(por[k].ult)}${outra?" — <b>usuário de OUTRA loja!</b>":""}
+      <button class="bt-g" onclick="apagarLancamentos('${loja}','${k}')">🗑️ Apagar</button></div>`;}).join("");
+}
+async function apagarLancamentos(loja,uid){
+  const u=(cache.users||{})[uid]||{nome:"este usuário"};
+  if(!await confirmar({loja, titulo:"Apagar as sugestões de hoje lançadas por", grande:esc(u.nome),
+    corpo:`<p>Na loja <b>${esc(nomeLojaLongo(loja))}</b>. A sugestão do sistema e o pedido do comprador continuam; some só o que esse usuário digitou hoje.</p>`,
+    ok:"Apagar"})) return;
+  const {error}=await sb.from("aves_sugestoes").update({sug_operador:null,justificativa_operador:null,operador_login:null,operador_em:null})
+    .eq("data",cache.hoje).eq("loja",loja).eq("operador_login",uid);
+  if(error) return alert("Erro: "+error.message);
+  alert("✅ Lançamentos apagados."); await carregar(); render();
 }
 function eqComp(pid){
   const el=$("#eqc"+pid); if(el) el.textContent=equiv(cache.porId[pid], $("#pd"+pid).value);
@@ -414,6 +694,12 @@ async function salvarComprador(){
       comprador_login:sess.id,comprador_em:new Date().toISOString()});
   }
   if(!ups.length) return alert("Nenhum pedido digitado.");
+  const fora=[]; for(const u of ups){const it=cache.porId[u.id_produto]; const r=foraDoNormal(lojaSel,it,u.pedido_final);
+    if(r) fora.push({nome:it.descricao,val:u.pedido_final,ref:r});}
+  const i=LOJA_INFO[lojaSel]||{nome:lojaSel,bairro:""};
+  if(!await confirmar({loja:lojaSel, titulo:`Salvar pedido de ${ups.length} itens da loja`, grande:`${lojaSel} · ${esc(i.nome)}`,
+     corpo:`<p style="text-align:center;margin:0 0 6px">📍 ${esc(i.bairro)}</p>${alertaTroca(lojaSel)}${listaFora(fora)}`,
+     ok:"Salvar pedido", exigeCheck: fora.length?"Conferi os itens acima":null})) return;
   const {error}=await sb.from("aves_sugestoes").upsert(ups,{onConflict:"data,loja,id_produto"});
   if(error) return alert("Erro: "+error.message);
   alert(`✅ Pedido de ${lojaSel} salvo (${ups.length} itens).`);
@@ -461,6 +747,7 @@ function render(){
 async function iniciar(){
   $("#hUser").textContent=sess.nome.split(" ")[0];
   $("#app").innerHTML=`<p class="center muted">Carregando…</p>`;
+  if(!await confirmaLojaDoDia()) return;
   try{ await carregar(); render(); }
   catch(e){ $("#app").innerHTML=`<div class="alert">Erro ao carregar: ${esc(e.message||e)}</div>`; }
 }
