@@ -77,6 +77,9 @@ table{width:100%; border-collapse:collapse; font-size:13px}
 th,td{padding:7px 6px; border-bottom:1px solid var(--bd); text-align:right}
 th:first-child, td:first-child{text-align:left}
 th{color:var(--mut); font-size:11px; text-transform:uppercase}
+.carimbo{font-size:10px;font-weight:700;margin-top:2px;white-space:nowrap}
+.carimbo.hj{color:#188038} .carimbo.velho{color:#c5221f}
+.dia-ref{background:#e8f0fe;border-left:4px solid var(--navy2);font-weight:700}
 .just{font-size:12px; background:var(--bg); border-radius:8px; padding:6px 8px; margin-top:4px; color:var(--mut)}
 .login-box{max-width:360px; margin:60px auto; text-align:center}
 .login-box img,.login-logo{width:74px;height:74px;margin-bottom:10px}
@@ -158,6 +161,14 @@ async function sha256(t){const b=await crypto.subtle.digest("SHA-256",new TextEn
 function hojeRecife(){ // data corrente no fuso de Recife
   return new Intl.DateTimeFormat("en-CA",{timeZone:"America/Recife"}).format(new Date());}
 function dISO(d){return d.toISOString().slice(0,10);}
+function diaRecife(iso){return iso?new Intl.DateTimeFormat("en-CA",{timeZone:"America/Recife"}).format(new Date(iso)):"";}
+function dm(iso){const [a,m,d]=iso.split("-");return d+"/"+m;}
+const DIAS_SEM=["domingo","segunda","terça","quarta","quinta","sexta","sábado"];
+function hojeExtenso(){const h=hojeRecife();return DIAS_SEM[new Date(h+"T12:00:00").getDay()]+", "+dm(h);}
+// carimbo de quando foi lançado: verde se hoje, vermelho se de outro dia
+function carimbo(iso,quem){ if(!iso) return "";
+  const d=diaRecife(iso), hj=d===hojeRecife();
+  return `<div class="carimbo ${hj?"hj":"velho"}">${hj?"✅ hoje":"⚠️ "+dm(d)} ${hhmm(iso)}${quem?" · "+esc(quem):""}</div>`;}
 function fmt(n,dec){ if(n===null||n===undefined) return "—";
   return Number(n).toLocaleString("pt-BR",{minimumFractionDigits:dec??0,maximumFractionDigits:dec??1});}
 function unidade(it){return it.tipo==="granel"?"kg":it.tipo==="galeto"?"un":"bdj";}
@@ -322,6 +333,13 @@ async function carregar(){
       }
     }
   }
+  // Trava 23/10: só vale lançamento feito HOJE (fuso Recife); de outro dia é descartado da tela
+  for(const s of cache.sug){
+    if(s.operador_em && diaRecife(s.operador_em)!==hoje){
+      Object.assign(s,{sug_operador:null,justificativa_operador:null,operador_login:null,operador_em:null});}
+    if(s.comprador_em && diaRecife(s.comprador_em)!==hoje){
+      Object.assign(s,{pedido_final:null,comprador_login:null,comprador_em:null});}
+  }
   if(PAPEIS_COMPRADOR.includes(sess.papel)){
     const us=await sb.from("usuarios").select("id,nome,loja");
     cache.users=us.error?{}:Object.fromEntries(us.data.map(u=>[u.id,u]));
@@ -430,7 +448,8 @@ function grupoItens(loja,editavel){
             <input type="number" min="0" step="1" id="op${it.id_produto}"
               value="${s.sug_operador??""}" placeholder="${fmt(s.sug_sistema)}"
               oninput="mostraJust(${it.id_produto},${s.sug_sistema??0})"> ${up}
-            <span class="muted" id="eq${it.id_produto}">${equiv(it,s.sug_operador??s.sug_sistema)}</span></div>`:""}
+            <span class="muted" id="eq${it.id_produto}">${equiv(it,s.sug_operador??s.sug_sistema)}</span></div>
+            ${s.operador_em?carimbo(s.operador_em,"enviado"):""}`:""}
         </div>
         ${editavel?`<textarea id="ju${it.id_produto}" class="${(s.justificativa_operador||difere(s))?"":"hide"}"
           placeholder="Explique: por que discorda do estoque/sugestão? (obrigatório se mudar)">${esc(s.justificativa_operador||"")}</textarea>`:""}
@@ -637,7 +656,8 @@ function vComprador(){
   else if(cache.dataBase) h+=avisoBase();
   const pend=cache.sug.filter(s=>s.loja===lojaSel&&s.sug_operador===null).length;
   const tot=cache.sug.filter(s=>s.loja===lojaSel).length;
-  h+=`<div class="card muted">Operador de ${esc(nomeLoja(lojaSel))}: <b>${tot-pend}/${tot}</b> itens com sugestão registrada.
+  h+=`<div class="card dia-ref">📅 Sugestões e pedidos de HOJE — ${hojeExtenso()}. Lançamento de outro dia não aparece aqui.</div>`;
+  h+=`<div class="card muted">Operador de ${esc(nomeLoja(lojaSel))}: <b>${tot-pend}/${tot}</b> itens com sugestão registrada hoje.
       Prazo do fornecedor: <b>09h00</b>.${blocoLancadores(lojaSel)}</div>`;
   h+=`<div class="tblwrap"><table><tr class="cab" style="--cl:${corLoja(lojaSel)}"><th>Item · ${esc(nomeLoja(lojaSel))}</th><th>Est.</th><th>Prev 2d</th><th>🚚</th><th>Sist.</th><th>Oper.</th><th>Pedido</th></tr>`;
   const ordenados=[...cache.itens].sort((a,b)=>(a.grupo||"").localeCompare(b.grupo||"")||(a.ordem-b.ordem));
@@ -655,11 +675,12 @@ function vComprador(){
       <td>${fmt((s.prev_d1||0)+(s.prev_d2||0))}</td>
       <td>${temTransito(s)?`<span class="selo-tr ${s.transito_dias>=3?"velho":""}" title="NF ${esc(s.transito_nf||"")}">${fmt(s.transito_cx,1)}</span>`:"—"}</td>
       <td><b>${fmt(s.sug_sistema)}</b>${temTransito(s)?`<div class="muted" style="font-size:10px">c/ trânsito: <b>${fmt(s.sug_liquida)}</b></div>`:""}</td>
-      <td>${s.sug_operador===null||s.sug_operador===undefined?"—":`<b class="${difere(s)?"neg":"pos"}">${fmt(s.sug_operador)}</b>`}</td>
+      <td>${s.sug_operador===null||s.sug_operador===undefined?"—":`<b class="${difere(s)?"neg":"pos"}">${fmt(s.sug_operador)}</b>${carimbo(s.operador_em,((cache.users||{})[s.operador_login]||{}).nome)}`}</td>
       <td><input type="number" min="0" step="1" style="width:58px;padding:6px" id="pd${it.id_produto}"
           value="${s.pedido_final??""}" placeholder="${fmt(s.sug_operador??s.sug_sistema)}"
           oninput="eqComp(${it.id_produto})"> cx
-          <div class="muted" style="font-size:11px" id="eqc${it.id_produto}">${equiv(it,s.pedido_final??s.sug_operador??s.sug_sistema)}</div></td>
+          <div class="muted" style="font-size:11px" id="eqc${it.id_produto}">${equiv(it,s.pedido_final??s.sug_operador??s.sug_sistema)}</div>
+          ${s.pedido_final!==null&&s.pedido_final!==undefined?carimbo(s.comprador_em,((cache.users||{})[s.comprador_login]||{}).nome):""}</td>
     </tr>`;
   }
   h+=`</table></div>`;
