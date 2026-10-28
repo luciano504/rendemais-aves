@@ -297,7 +297,14 @@ RESUMO.append(f"Fatores recalculados: {len(fatores_rows)} loja x item")
 # O XML da NF-e fica em notaentradanfe.xml; os itens saem dele por regex e o
 # código do fornecedor (cProd) vira id_produto pela tabela produtofornecedor.
 # A quantidade no XML SEMPRE vem em kg -> convertemos pela kg_por_unidade.
-TRANSITO_DIAS = 10
+#
+# TRÊS DIAS, NÃO DEZ: em 45 dias, as 217 notas de venda de aves que entraram
+# levaram 0 dia (80%), 1 dia (13%), 2 dias (3%) ou 3 dias (4%). NENHUMA passou
+# disso. Uma nota de aves com 4+ dias sem entrada não está vindo — já voltou,
+# foi recusada ou nunca existiu. Com a janela de 10 dias o app mostrava nota de
+# uma semana atrás como "a caminho" e a loja ficava esperando (caso da L03 em
+# 28/10: NF 4777325 de 21/10, recusada, ainda aparecia como trânsito).
+TRANSITO_DIAS = 3
 
 transito_rows, transito_por_chave = [], defaultdict(lambda: {"qtd": 0.0, "cx": 0.0, "nfs": []})
 try:
@@ -313,6 +320,20 @@ WITH pf AS MATERIALIZED (
   WHERE id_produto IN ({ids_tr}) AND id_fornecedor IN ({forn_ids})
   GROUP BY 1,2
 ),
+voltou AS MATERIALIZED (
+  -- MERCADORIA QUE VOLTOU. Quando a loja recusa a carga ou o entregador não
+  -- encontra, o fornecedor emite uma NF de "Retorno por Recusa" que aponta a
+  -- venda original em <refNFe>. A venda original fica pendurada para sempre,
+  -- porque nunca vai dar entrada. É ela que temos de matar: foi o que fez a
+  -- L03 esperar mercadoria que já tinha voltado.
+  SELECT DISTINCT substring(r.xml from '<refNFe>([^<]*)</refNFe>') chave
+  FROM public.notaentradanfe r
+  WHERE r.dataentrada >= current_date - 15
+    AND r.id_fornecedor IN ({forn_ids})
+    AND length(coalesce(r.xml,'')) > 500
+    AND substring(r.xml from '<natOp>([^<]*)</natOp>') ~* '(RECUSA|RETORNO|DEVOLU)'
+    AND substring(r.xml from '<refNFe>([^<]*)</refNFe>') IS NOT NULL
+),
 nf AS MATERIALIZED (
   SELECT nfe.id_loja, nfe.id_fornecedor, nfe.numeronota, nfe.chavenfe,
          nfe.dataentrada::date emitida, (current_date - nfe.dataentrada::date) dias,
@@ -323,6 +344,11 @@ nf AS MATERIALIZED (
     AND nfe.id_loja IN ({lojas_ids})
     AND length(coalesce(nfe.xml,'')) > 500
     AND NOT EXISTS (SELECT 1 FROM public.notaentrada n WHERE n.chavenfe = nfe.chavenfe)
+    -- a própria nota não pode ser de devolução/retorno: essas NUNCA dão entrada
+    -- (18 em 20 dias, todas penduradas) e não são mercadoria chegando
+    AND substring(nfe.xml from '<natOp>([^<]*)</natOp>') !~* '(RECUSA|RETORNO|DEVOLU)'
+    -- e não pode ser uma venda que já voltou
+    AND NOT EXISTS (SELECT 1 FROM voltou v WHERE v.chave = nfe.chavenfe)
 ),
 det AS MATERIALIZED (
   SELECT nf.id_loja, nf.id_fornecedor, nf.numeronota, nf.chavenfe, nf.emitida, nf.dias,
