@@ -183,21 +183,24 @@ function temTransito(s){return s && Number(s.transito_cx)>0;}
 function selo(s){
   if(!temTransito(s)) return "";
   const d=s.transito_dias;
-  return `<span class="selo-tr ${d>=3?"velho":""}">🚚 ${fmt(s.transito_cx,1)} cx a caminho</span>`;
+  return `<span class="selo-tr ${d>=2?"velho":""}">🚚 ${fmt(s.transito_cx,1)} cx a caminho</span>`;
 }
 function avisoTransito(it,s){
   if(!temTransito(s)) return "";
   const d = s.transito_dias, u = unidade(it);
-  const velho = d>=3;
+  // 2 dias já é sinal amarelo: em 45 dias NENHUMA nota de aves levou mais de
+  // 3 dias para dar entrada (80% entram no mesmo dia, 93% até o dia seguinte).
+  const velho = d>=2;
   return `<div class="transito ${velho?"velho":""}">
     <b>🚚 JÁ FATURADO — NÃO PEÇA DE NOVO.</b>
     O fornecedor emitiu <b>${fmt(s.transito_cx,1)} cx</b> (${fmt(s.transito_qtd,1)} ${u})
     que ainda não deram entrada nesta loja.<br>
     <span class="nf">NF ${esc(s.transito_nf||"")}</span>
     ${velho
-      ? `<b class="alerta-velho">Emitida há ${d} dias.</b> Para resfriado isso é muito tempo:
-         confirme com o fornecedor se está mesmo a caminho, se já chegou sem ser lançada,
-         ou se a nota foi cancelada — só então peça de novo.`
+      ? `<b class="alerta-velho">Emitida há ${d} dias — fora do prazo normal.</b>
+         Aves chegam no mesmo dia ou no dia seguinte. <b>NÃO conte com esta mercadoria
+         sem ligar para o fornecedor:</b> pode ter sido recusada na portaria e voltado.
+         Se o fornecedor confirmar que não vem, peça de novo hoje mesmo.`
       : `Considerando o que vem, o pedido de hoje seria
          <b>${fmt(s.sug_liquida)} cx</b> em vez de ${fmt(s.sug_sistema)} cx.`}
   </div>`;
@@ -673,7 +676,7 @@ function vComprador(){
           ${s.justificativa_operador?`<div class="just">💬 ${esc(s.justificativa_operador)}</div>`:""}</td>
       <td>${fmt(s.estoque_virtual)}</td>
       <td>${fmt((s.prev_d1||0)+(s.prev_d2||0))}</td>
-      <td>${temTransito(s)?`<span class="selo-tr ${s.transito_dias>=3?"velho":""}" title="NF ${esc(s.transito_nf||"")}">${fmt(s.transito_cx,1)}</span>`:"—"}</td>
+      <td>${temTransito(s)?`<span class="selo-tr ${s.transito_dias>=2?"velho":""}" title="NF ${esc(s.transito_nf||"")}">${fmt(s.transito_cx,1)}</span>`:"—"}</td>
       <td><b>${fmt(s.sug_sistema)}</b>${temTransito(s)?`<div class="muted" style="font-size:10px">c/ trânsito: <b>${fmt(s.sug_liquida)}</b></div>`:""}</td>
       <td>${s.sug_operador===null||s.sug_operador===undefined?"—":`<b class="${difere(s)?"neg":"pos"}">${fmt(s.sug_operador)}</b>${carimbo(s.operador_em,((cache.users||{})[s.operador_login]||{}).nome)}`}</td>
       <td><input type="number" min="0" step="1" style="width:58px;padding:6px" id="pd${it.id_produto}"
