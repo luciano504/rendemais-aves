@@ -1,0 +1,43 @@
+name: Vendas Premiadas (VR -> Supabase)
+
+# Roda aqui porque este repo já tem VR_URL, SUPABASE_URL e SUPABASE_KEY.
+# O código fica no repo público luciano504/vendas-premiadas.
+on:
+  schedule:
+    # Recife (UTC-3): 06h, 08h, 10h, 12h, 14h, 16h, 18h e 20h
+    - cron: "0 9,11,13,15,17,19,21,23 * * *"
+  workflow_dispatch:
+    inputs:
+      recarregar:
+        description: "Reconsultar no VR também as rodadas já fechadas (1 = sim)"
+        required: false
+        default: "0"
+
+concurrency:
+  group: vendas-premiadas
+  cancel-in-progress: false
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: luciano504/vendas-premiadas
+          path: vp
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Dependências
+        run: pip install pandas requests
+
+      - name: VR -> Supabase
+        env:
+          VR_URL: ${{ secrets.VR_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          RECARREGAR: ${{ github.event.inputs.recarregar || '0' }}
+        run: python vp/scripts/atualizar.py
