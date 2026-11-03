@@ -1,0 +1,42 @@
+name: Sondar operadoras (VR)
+
+# Diagnóstico temporário para o Vendas Premiadas: descobre onde o VR grava a
+# operadora de caixa de cada cupom. Mostra só nomes de colunas e contagens
+# (este repo é público — nenhum nome de pessoa vai para o resumo).
+on:
+  workflow_dispatch: {}
+
+jobs:
+  sondar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas requests
+      - name: Sondar
+        env:
+          VR_URL: ${{ secrets.VR_URL }}
+        run: |
+          cat > s.py <<'PY'
+          import os, io, requests, pandas as pd
+          from urllib.parse import urlencode
+          U=os.environ["VR_URL"]; out=[]
+          def q(sql):
+              r=requests.post(U,data=urlencode({"sql_query":sql,"export_type":"csv"}),headers={"Content-Type":"application/x-www-form-urlencoded"},timeout=300)
+              t=r.text.lstrip("﻿").lstrip()
+              if t[:1]=="<" or "fatal error" in t[:200].lower(): return "ERRO: "+t[:150].replace("\n"," ")
+              return pd.read_csv(io.StringIO(t))
+          def bloco(tit,sql):
+              d=q(sql); out.append(f"### {tit}\n")
+              out.append(d if isinstance(d,str) else "```\n"+d.to_string(index=False)[:6000]+"\n```")
+              out.append("\n")
+          bloco("Colunas de pdv.venda","select column_name,data_type from information_schema.columns where table_schema='pdv' and table_name='venda' order by ordinal_position")
+          bloco("Colunas de pdv.vendaitem","select column_name,data_type from information_schema.columns where table_schema='pdv' and table_name='vendaitem' order by ordinal_position")
+          bloco("Tabelas com operador/caixa/usuario/funcionario no nome","select table_schema,table_name from information_schema.tables where table_name ilike any(array['%operador%','%usuario%','%funcionario%','%caixa%','%atendente%']) order by 1,2")
+          bloco("Colunas de pdv.operador (se existir)","select column_name,data_type from information_schema.columns where table_schema='pdv' and table_name='operador' order by ordinal_position")
+          bloco("Colunas de public.operador / public.usuario","select table_name,column_name,data_type from information_schema.columns where table_schema='public' and table_name in ('operador','usuario','funcionario') order by 1,ordinal_position")
+          open(os.environ["GITHUB_STEP_SUMMARY"],"a").write("\n".join(str(x) for x in out))
+          PY
+          python s.py
