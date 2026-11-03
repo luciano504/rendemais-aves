@@ -32,11 +32,20 @@ jobs:
               d=q(sql); out.append(f"### {tit}\n")
               out.append(d if isinstance(d,str) else "```\n"+d.to_string(index=False)[:6000]+"\n```")
               out.append("\n")
-          bloco("Colunas de pdv.venda","select column_name,data_type from information_schema.columns where table_schema='pdv' and table_name='venda' order by ordinal_position")
-          bloco("Colunas de pdv.vendaitem","select column_name,data_type from information_schema.columns where table_schema='pdv' and table_name='vendaitem' order by ordinal_position")
-          bloco("Tabelas com operador/caixa/usuario/funcionario no nome","select table_schema,table_name from information_schema.tables where table_name ilike any(array['%operador%','%usuario%','%funcionario%','%caixa%','%atendente%']) order by 1,2")
-          bloco("Colunas de pdv.operador (se existir)","select column_name,data_type from information_schema.columns where table_schema='pdv' and table_name='operador' order by ordinal_position")
-          bloco("Colunas de public.operador / public.usuario","select table_name,column_name,data_type from information_schema.columns where table_schema='public' and table_name in ('operador','usuario','funcionario') order by 1,ordinal_position")
+          bloco("Cobertura: vendas de 105,106,371,3421,3420,3422 em nov/26 por loja","""
+            select v.id_loja, count(distinct v.id) cupons,
+                   count(distinct v.id) filter (where o.id is not null) cupons_com_operadora,
+                   count(distinct v.matricula) matriculas, count(distinct o.id) operadoras_achadas,
+                   count(distinct v.id) filter (where v.matricula is null or v.matricula=0) sem_matricula
+            from pdv.venda v join pdv.vendaitem vi on vi.id_venda=v.id
+            left join pdv.operador o on o.matricula=v.matricula and o.id_loja=v.id_loja
+            where vi.id_produto in (105,106,371,3421,3420,3422) and v.data>='2026-11-01'
+              and not v.cancelado and not vi.cancelado
+            group by 1 order by 1""")
+          bloco("Matrícula repetida em mais de uma loja (operadora que trabalha em 2 lojas?)","""
+            select count(*) matriculas_em_varias_lojas from (select matricula from pdv.operador where id_situacaocadastro=1 group by matricula having count(distinct id_loja)>1) x""")
+          bloco("Operadoras ativas por loja","select id_loja, count(*) ativas, count(*) filter (where id_tiponiveloperador is not null) com_nivel from pdv.operador where id_situacaocadastro=1 group by 1 order by 1")
+          bloco("Níveis de operador","select id, descricao from pdv.tiponiveloperador order by 1")
           open(os.environ["GITHUB_STEP_SUMMARY"],"a").write("\n".join(str(x) for x in out))
           PY
           python s.py
